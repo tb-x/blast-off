@@ -33,7 +33,7 @@
     background-size:18px 18px}
   #tray::before{content:"";position:absolute;left:0;right:0;top:0;height:7px;
     background:repeating-linear-gradient(-45deg,var(--yellow) 0 12px,var(--ink) 12px 24px)}
-  #tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--gap);width:calc(6 * var(--tile) + 5 * var(--gap))}
+  #tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--gap);width:calc(6 * var(--tile) + 5 * var(--gap))}
   .tab{height:calc(var(--tile) * .66);border-radius:14px;border:2.5px solid rgba(255,255,255,.35);background:rgba(10,20,70,.35);
     display:grid;place-items:center;padding:0;cursor:pointer;touch-action:manipulation}
   .tab img{height:82%;width:82%;object-fit:contain;pointer-events:none}
@@ -46,7 +46,7 @@
     #app{flex-direction:row}
     #tray{flex-direction:row;padding:calc(12px + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) 19px}
     #tray::before{right:auto;bottom:0;width:7px;height:auto}
-    #tabs{grid-template-columns:none;grid-template-rows:repeat(5,1fr);width:auto;height:calc(6 * var(--tile) + 5 * var(--gap))}
+    #tabs{grid-template-columns:none;grid-template-rows:repeat(6,1fr);width:auto;height:calc(6 * var(--tile) + 5 * var(--gap))}
     .tab{height:auto;width:calc(var(--tile) * .72)}
     .row{flex-direction:column;width:var(--tile);height:calc(6 * var(--tile) + 5 * var(--gap))}
   }
@@ -507,9 +507,9 @@ function sparkle(p) {
    ============================================================ */
 const lathe = (pts, mat) => mesh(new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), 40), mat);
 const band = (r, h, y, col, g) => { const b = mesh(new THREE.CylinderGeometry(r, r, h, 40), std(col)); b.position.y = y; g.add(b); return b; };
-function finShape(s) {
+function finShape(s, cy = 0.175) {
   const geo = new THREE.ExtrudeGeometry(s, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2, curveSegments: 10 });
-  geo.translate(-0.02, -0.175, -0.05); return geo;
+  geo.translate(-0.02, -cy, -0.05); return geo;
 }
 const metal = () => std('#6a7390', { metalness: 0.55, roughness: 0.3, side: THREE.DoubleSide });
 const BUILD = {
@@ -624,23 +624,127 @@ const BUILD = {
     const dot = mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.18, 20), std('#ffd23f')); dot.rotation.x = Math.PI / 2; dot.position.set(0.4, -0.05, 0); g.add(dot);
     return g;
   },
+  wing() {
+    const s = new THREE.Shape();
+    s.moveTo(0, 1.2); s.lineTo(0, -0.3); s.lineTo(1.15, -0.62); s.lineTo(1.15, -0.38); s.lineTo(0, 1.2);
+    const g = new THREE.Group(); g.add(mesh(finShape(s, 0.29), std('#ffd23f')));
+    const tip = mesh(new THREE.BoxGeometry(0.1, 0.3, 0.2), std('#ff4b3e')); tip.position.set(1.15, -0.79, 0); g.add(tip);
+    return g;
+  },
+  spikeFin() {
+    const s = new THREE.Shape();
+    s.moveTo(0, 1.3); s.lineTo(0, 0.1); s.lineTo(0.62, -0.62); s.lineTo(0.5, -0.15); s.lineTo(0, 1.3);
+    const g = new THREE.Group(); g.add(mesh(finShape(s, 0.34), std('#3ccf6a'))); return g;
+  },
+  /* ----- more bodies and noses ----- */
+  longTank() {
+    const g = new THREE.Group();
+    g.add(mesh(new THREE.CylinderGeometry(0.8, 0.8, 3.0, 40), std('#eef2fa')));
+    band(0.83, 0.16, 1.38, '#ff4b3e', g); band(0.83, 0.16, -1.38, '#ff4b3e', g); band(0.83, 0.12, 0, '#ffd23f', g);
+    for (const a of [0, Math.PI]) { const s = mesh(new THREE.CylinderGeometry(0.812, 0.812, 2.6, 6, 1, true, a - 0.16, 0.32), std('#2f6bff', { side: THREE.DoubleSide })); g.add(s); }
+    return g;
+  },
+  cockpit() {
+    const g = new THREE.Group(), pts = [];
+    for (let i = 0; i <= 20; i++) { const t = i / 20; pts.push([Math.max(0.001, 0.8 * Math.sqrt(1 - Math.pow(t, 2.4))), -0.75 + 1.5 * t]); }
+    g.add(lathe(pts, std('#ff8a1f', { side: THREE.DoubleSide })));
+    const cap = mesh(new THREE.CircleGeometry(0.8, 40), std('#c46210')); cap.rotation.x = Math.PI / 2; cap.position.y = -0.75; g.add(cap);
+    band(0.83, 0.12, -0.68, '#20243d', g);
+    const glass = mesh(new THREE.SphereGeometry(0.42, 24, 16), std('#5cc8ff', { roughness: 0.1, emissive: 0x1a6fb0, emissiveIntensity: 0.35 }));
+    glass.scale.set(1, 0.75, 0.62); glass.position.set(0, 0.05, 0.5); g.add(glass);
+    const frame = mesh(new THREE.TorusGeometry(0.42, 0.04, 8, 32, Math.PI), std('#20243d')); frame.scale.set(1, 0.75, 1); frame.position.set(0, 0.05, 0.62); frame.rotation.z = 0; g.add(frame);
+    const shine = mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })); shine.position.set(-0.16, 0.16, 0.74); g.add(shine);
+    return g;
+  },
+  /* ----- gadgets: 3D decorations that stick anywhere; +Z points out of the rocket ----- */
+  radar() {
+    const g = new THREE.Group();
+    const base = mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.12, 16), metal()); base.rotation.x = Math.PI / 2; base.position.z = 0.06; g.add(base);
+    const spin = new THREE.Group(); spin.position.z = 0.12; g.add(spin);
+    const mast = mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 10), metal()); mast.rotation.x = Math.PI / 2; mast.position.z = 0.15; spin.add(mast);
+    const tilt = new THREE.Group(); tilt.position.z = 0.3; tilt.rotation.x = -0.55; spin.add(tilt);
+    const dish = mesh(new THREE.SphereGeometry(0.36, 24, 10, 0, TAU, 0, 0.95), std('#f5f7ff', { side: THREE.DoubleSide, roughness: 0.4 }));
+    dish.rotation.x = -Math.PI / 2; dish.position.z = 0.34; tilt.add(dish);
+    const feed = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 6), metal()); feed.rotation.x = Math.PI / 2; feed.position.z = 0.28; tilt.add(feed);
+    const bulb = mesh(new THREE.SphereGeometry(0.05, 10, 8), std('#ff4b3e', { emissive: 0xff2200, emissiveIntensity: 0.5 })); bulb.position.z = 0.43; tilt.add(bulb);
+    g.userData.spin = spin; g.userData.spinSpeed = 1.3;
+    return g;
+  },
+  beacon() {
+    const g = new THREE.Group();
+    const base = mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.08, 20), std('#3a3f5c')); base.rotation.x = Math.PI / 2; base.position.z = 0.04; g.add(base);
+    const m = std('#ff3030', { emissive: 0xff1010, emissiveIntensity: 1, roughness: 0.2 });
+    const dome = mesh(new THREE.SphereGeometry(0.14, 18, 10, 0, TAU, 0, Math.PI / 2), m); dome.rotation.x = Math.PI / 2; dome.position.z = 0.08; g.add(dome);
+    const cage = mesh(new THREE.TorusGeometry(0.145, 0.015, 6, 24), std('#20243d')); cage.position.z = 0.13; g.add(cage);
+    g.userData.blink = m; g.userData.blinkSpeed = 6;
+    return g;
+  },
+  headlight() {
+    const g = new THREE.Group();
+    for (const x of [-0.17, 0.17]) {
+      const house = mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.14, 20), std('#3a3f5c')); house.rotation.x = Math.PI / 2; house.position.set(x, 0, 0.07); g.add(house);
+      const lens = mesh(new THREE.CircleGeometry(0.11, 20), std('#fff6c0', { emissive: 0xffe066, emissiveIntensity: 1.5 })); lens.position.set(x, 0, 0.145); g.add(lens);
+      const rim = mesh(new THREE.TorusGeometry(0.12, 0.02, 6, 20), metal()); rim.position.set(x, 0, 0.145); g.add(rim);
+    }
+    return g;
+  },
+  fan() {
+    const g = new THREE.Group();
+    const post = mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.14, 10), metal()); post.rotation.x = Math.PI / 2; post.position.z = 0.07; g.add(post);
+    const ring = mesh(new THREE.TorusGeometry(0.3, 0.04, 8, 32), std('#3f8cff')); ring.position.z = 0.16; g.add(ring);
+    const spin = new THREE.Group(); spin.position.z = 0.16; g.add(spin);
+    spin.add(mesh(new THREE.SphereGeometry(0.06, 12, 8), std('#ffd23f')));
+    for (let i = 0; i < 4; i++) {
+      const arm = new THREE.Group(); arm.rotation.z = i * Math.PI / 2; spin.add(arm);
+      const blade = mesh(new THREE.BoxGeometry(0.1, 0.22, 0.02), std('#ff8a1f')); blade.position.y = 0.15; blade.rotation.y = 0.45; arm.add(blade);
+    }
+    g.userData.spin = spin; g.userData.spinSpeed = 14;
+    return g;
+  },
+  antenna() {
+    const g = new THREE.Group();
+    const base = mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.08, 12), metal()); base.rotation.x = Math.PI / 2; base.position.z = 0.04; g.add(base);
+    const rod = mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.75, 8), metal()); rod.position.set(0, 0.36, 0.08); rod.rotation.x = 0.15; g.add(rod);
+    const m = std('#3ccf6a', { emissive: 0x20ff40, emissiveIntensity: 1 });
+    const tip = mesh(new THREE.SphereGeometry(0.06, 12, 8), m); tip.position.set(0, 0.73, 0.13); g.add(tip);
+    const rod2 = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35, 6), metal()); rod2.position.set(0.1, 0.18, 0.08); rod2.rotation.z = -0.6; g.add(rod2);
+    g.userData.blink = m; g.userData.blinkSpeed = 3;
+    return g;
+  },
+  solar() {
+    const g = new THREE.Group();
+    const arm = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 8), metal()); arm.rotation.x = Math.PI / 2; arm.position.z = 0.15; g.add(arm);
+    const panelTex = canvasTex(128, 64, (c) => { c.fillStyle = '#1d3f9e'; c.fillRect(0, 0, 128, 64); c.strokeStyle = '#8fb4ff'; c.lineWidth = 2; for (let x = 0; x <= 128; x += 16) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 64); c.stroke(); } for (let y = 0; y <= 64; y += 16) { c.beginPath(); c.moveTo(0, y); c.lineTo(128, y); c.stroke(); } });
+    const panel = mesh(new THREE.BoxGeometry(0.95, 0.46, 0.03), std('#b3bdd2')); panel.position.z = 0.32; g.add(panel);
+    const cells = mesh(new THREE.PlaneGeometry(0.9, 0.41), std('#ffffff', { map: panelTex, roughness: 0.25, metalness: 0.3 })); cells.position.z = 0.337; g.add(cells);
+    return g;
+  },
 };
+const GADGETS = ['radar', 'beacon', 'headlight', 'fan', 'antenna', 'solar'];
 // role decides where a part belongs; kind decides how it attaches
-const ROLE = { engine: 'engine', bigEngine: 'engine', tripleEngine: 'engine', booster: 'booster', tank: 'body', shortTank: 'body', cabin: 'body', fatTank: 'body', nose: 'nose', dome: 'nose', needle: 'nose', fin: 'fin', roundFin: 'fin' };
+const ROLE = {
+  engine: 'engine', bigEngine: 'engine', tripleEngine: 'engine', booster: 'booster',
+  tank: 'body', shortTank: 'body', cabin: 'body', fatTank: 'body', longTank: 'body',
+  nose: 'nose', dome: 'nose', needle: 'nose', cockpit: 'nose',
+  fin: 'fin', roundFin: 'fin', wing: 'fin', spikeFin: 'fin',
+};
 const kindOf = (type) => (ROLE[type] === 'fin' || ROLE[type] === 'booster' ? 'side' : 'stack');
 const DIMS = {
   engine: { h: 1.5, w: 1.68 }, bigEngine: { h: 1.7, w: 1.68 }, tripleEngine: { h: 1.4, w: 1.68 },
-  tank: { h: 2.2, w: 1.66 }, shortTank: { h: 1.2, w: 1.66 }, cabin: { h: 1.6, w: 1.66 }, fatTank: { h: 1.6, w: 2.0 },
-  nose: { h: 1.6, w: 1.66 }, dome: { h: 0.9, w: 1.68 }, needle: { h: 2.0, w: 1.66 },
+  tank: { h: 2.2, w: 1.66 }, shortTank: { h: 1.2, w: 1.66 }, cabin: { h: 1.6, w: 1.66 }, fatTank: { h: 1.6, w: 2.0 }, longTank: { h: 3.0, w: 1.66 },
+  nose: { h: 1.6, w: 1.66 }, dome: { h: 0.9, w: 1.68 }, needle: { h: 2.0, w: 1.66 }, cockpit: { h: 1.5, w: 1.66 },
 };
-const SIDE = { fin: { r: 0.78, y: 0.775 }, roundFin: { r: 0.78, y: 0.775 }, booster: { r: 1.12, y: 0.95 } };
+const SIDE = {
+  fin: { r: 0.78, y: 0.775 }, roundFin: { r: 0.78, y: 0.775 }, wing: { r: 0.78, y: 0.91 }, spikeFin: { r: 0.78, y: 0.96 },
+  booster: { r: 1.12, y: 0.95 },
+};
 // where the flames come out: [x, y, z, size] in the part's own frame
 const NOZZLES = {
   engine: [[0, -0.74, 0, 1]], bigEngine: [[0, -0.84, 0, 1.4]], booster: [[0, -0.94, 0, 0.5]],
   tripleEngine: [0, 1, 2].map((i) => { const a = i * TAU / 3 + Math.PI / 2; return [Math.cos(a) * 0.42, -0.69, Math.sin(a) * 0.42, 0.5]; }),
 };
 const THRUST = { engine: 1, bigEngine: 1.5, tripleEngine: 1.3, booster: 0.5 };
-const STACK_MAX = 6, SIDE_N = 6;
+const STACK_MAX = 10, SIDE_N = 6, MIN_FINS = 2;
 const SIDE_ANG = Array.from({ length: SIDE_N }, (_, k) => k * TAU / SIDE_N + TAU / 12);
 const sideSlotPos = (k, type) => { const s = SIDE[type]; return V(Math.cos(SIDE_ANG[k]) * s.r, s.y, Math.sin(SIDE_ANG[k]) * s.r); };
 const sideSlotQuat = (k) => new THREE.Quaternion().setFromAxisAngle(Y, -SIDE_ANG[k]);
@@ -757,10 +861,18 @@ for (const t of STICKERS) {
   const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; stickerTex[t] = tx;
 }
 const stickerGeo = new THREE.PlaneGeometry(0.62, 0.62);
-const allStickers = new Set();
+const allStickers = new Set();   // decorations: flat stickers and 3D gadgets, both just for fun
 function makeSticker(type) {
-  const mat = new THREE.MeshStandardMaterial({ map: stickerTex[type], alphaTest: 0.5, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  const s = new THREE.Mesh(stickerGeo, mat); s.userData.sticker = type; s.userData.bounce = 0; allStickers.add(s); return s;
+  let s;
+  if (GADGETS.includes(type)) {
+    s = BUILD[type]();
+    s.traverse((o) => { if (o.isMesh) o.userData.decor = s; });
+    s.userData.phase = Math.random() * TAU;
+  } else {
+    const mat = new THREE.MeshStandardMaterial({ map: stickerTex[type], alphaTest: 0.5, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    s = new THREE.Mesh(stickerGeo, mat); s.userData.decor = s;
+  }
+  s.userData.sticker = type; s.userData.bounce = 0; allStickers.add(s); return s;
 }
 function orientSticker(s, hit, ray) {
   const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
@@ -772,7 +884,15 @@ function attachSticker(s, host) {
   const sc = host.body.scale.x; host.body.scale.setScalar(1); host.body.updateMatrixWorld(true);
   host.body.attach(s); host.body.scale.setScalar(sc); s.userData.host = host;
 }
-function removeSticker(s) { s.removeFromParent(); s.material.dispose(); allStickers.delete(s); }
+function removeSticker(s) {
+  s.removeFromParent(); allStickers.delete(s);
+  s.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.material.map && o.material.map !== stickerTex[s.userData.sticker]) o.material.map.dispose();   // gadget textures are per-copy; sticker textures are shared
+    o.material.dispose(); if (o.geometry !== stickerGeo) o.geometry.dispose();
+  });
+}
+const decorURL = (type) => stickerURL[type] || partThumb(type, new THREE.Quaternion());
 
 /* ============================================================
    Tray thumbnails (rendered once per orientation)
@@ -806,15 +926,18 @@ function partThumb(type, quat) {
 const LABELS = {
   engine: 'Engine', bigEngine: 'Big engine', tripleEngine: 'Triple engine', booster: 'Side booster',
   tank: 'Fuel tank', shortTank: 'Short tank', cabin: 'Astronaut cabin', fatTank: 'Round tank',
-  nose: 'Nose cone', dome: 'Glass dome', needle: 'Needle nose', fin: 'Fin', roundFin: 'Round fin',
+  longTank: 'Long tank', nose: 'Nose cone', dome: 'Glass dome', needle: 'Needle nose', cockpit: 'Cockpit',
+  fin: 'Fin', roundFin: 'Round fin', wing: 'Wing', spikeFin: 'Spike fin',
+  radar: 'Radar dish', beacon: 'Blinking light', headlight: 'Headlights', fan: 'Fan', antenna: 'Antenna', solar: 'Solar panel',
   star: 'Star sticker', heart: 'Heart sticker', window: 'Window sticker', bolt: 'Lightning sticker', planet: 'Planet sticker', rainbow: 'Rainbow sticker',
 };
 const CATS = [
   { id: 'engines', label: 'Engines', icon: 'engine', items: ['engine', 'bigEngine', 'tripleEngine', 'booster'] },
-  { id: 'bodies', label: 'Rocket bodies', icon: 'tank', items: ['tank', 'shortTank', 'cabin', 'fatTank'] },
-  { id: 'noses', label: 'Noses', icon: 'nose', items: ['nose', 'dome', 'needle'] },
-  { id: 'fins', label: 'Fins', icon: 'fin', items: ['fin', 'roundFin'] },
-  { id: 'stickers', label: 'Stickers', icon: null, items: STICKERS },
+  { id: 'bodies', label: 'Rocket bodies', icon: 'tank', items: ['tank', 'shortTank', 'longTank', 'cabin', 'fatTank'] },
+  { id: 'noses', label: 'Noses', icon: 'nose', items: ['nose', 'dome', 'needle', 'cockpit'] },
+  { id: 'fins', label: 'Fins', icon: 'fin', items: ['fin', 'roundFin', 'wing', 'spikeFin'] },
+  { id: 'gadgets', label: 'Gadgets', icon: 'radar', decor: true, items: GADGETS },
+  { id: 'stickers', label: 'Stickers', icon: null, decor: true, items: STICKERS },
 ];
 const ROLE_CAT = { engine: 'engines', body: 'bodies', nose: 'noses', fin: 'fins' };
 const tabEls = {}, rowEls = {}, tiles = [];
@@ -842,7 +965,7 @@ for (const c of CATS) {
   const row = document.createElement('div'); row.className = 'row' + (c.id === 'stickers' ? ' stickers' : ''); itemsEl.appendChild(row); rowEls[c.id] = row;
   for (const t of c.items) {
     const tile = makeTile(row, LABELS[t]);
-    if (c.id === 'stickers') { tile.dataset.sticker = t; tile.querySelector('img').src = stickerURL[t]; }
+    if (c.decor) { tile.dataset.sticker = t; tile.querySelector('img').src = decorURL(t); }
     else { tile.dataset.type = t; rerollTile(tile); tiles.push(tile); }
   }
 }
@@ -867,7 +990,7 @@ function toScreen(v) {
 const isPlaced = (p) => p.where === 'stack' || p.where === 'side';
 function placedMeshes(withStickers) {
   const out = [];
-  for (const p of parts) if (isPlaced(p)) p.group.traverse((o) => { if (o.isMesh && (withStickers || !o.userData.sticker)) out.push(o); });
+  for (const p of parts) if (isPlaced(p)) p.group.traverse((o) => { if (o.isMesh && (withStickers || !o.userData.decor)) out.push(o); });
   return out;
 }
 function pick(x, y) {
@@ -875,7 +998,7 @@ function pick(x, y) {
   const hits = raycaster.intersectObjects(placedMeshes(true), false);
   if (!hits.length) return null;
   const o = hits[0].object;
-  return o.userData.sticker ? { sticker: o } : { part: o.userData.part };
+  return o.userData.decor ? { sticker: o.userData.decor } : { part: o.userData.part };
 }
 
 function onTileDown(e) {
@@ -927,11 +1050,11 @@ function beginFromPress() {
   if (pr.kind === 'tile') {
     const t = pr.tile;
     if (t.dataset.type) { const p = makePart(t.dataset.type, t.quat); startDragPart(p, t); }
-    else { const s = makeSticker(t.dataset.sticker); scene.add(s); drag = { sticker: s, target: null, src: stickerURL[t.dataset.sticker] }; sfx.pick(); }
+    else { const s = makeSticker(t.dataset.sticker); scene.add(s); drag = { sticker: s, target: null, src: decorURL(t.dataset.sticker) }; sfx.pick(); }
   } else if (pr.hit?.part) startDragPart(pr.hit.part, null);
   else if (pr.hit?.sticker) {
     const s = pr.hit.sticker; scene.attach(s); s.userData.host = null;
-    drag = { sticker: s, target: null, src: stickerURL[s.userData.sticker] }; sfx.pick();
+    drag = { sticker: s, target: null, src: decorURL(s.userData.sticker) }; sfx.pick();
   } else orbit = { v: 0, t: performance.now() };
   if (drag) updateDrag(lastX, lastY);
 }
@@ -1088,7 +1211,7 @@ function hideHand() { hand.getAnimations().forEach((a) => a.cancel()); }
 function showDragHint() {        // point from the box that has what the rocket still needs
   const has = (role) => stack.some((p) => ROLE[p.type] === role);
   const fins = sideSlots.filter((s) => s && ROLE[s.type] === 'fin').length;
-  const need = !stack.length || !has('engine') ? 'engine' : !has('body') ? 'body' : !has('nose') ? 'nose' : fins < 3 ? 'fin' : null;
+  const need = !stack.length || !has('engine') ? 'engine' : !has('nose') ? 'nose' : fins < MIN_FINS ? 'fin' : null;
   if (!need) return;
   const cat = CATS.find((c) => c.id === ROLE_CAT[need]); setTab(cat.id);
   const type = cat.items[0], tile = tileFor(type), tr = tile.getBoundingClientRect(), x0 = tr.left + tr.width / 2, y0 = tr.top + tr.height / 2;
@@ -1165,18 +1288,18 @@ function emitGroundSmoke(dt, rate) {
   while (gsAcc >= 1) { gsAcc--; const a = Math.random() * TAU, r = rand(0.4, 1.1), sp = rand(3, 6.5); smoke.emit(Math.cos(a) * r, 0.2, Math.sin(a) * r, Math.cos(a) * sp, rand(0.2, 1.2), Math.sin(a) * sp, rand(1.8, 3.2), rand(0.9, 1.4), rand(3, 4.6), C.smokeW0, C.smokeW1, 0.6, 0.5, 1.1); }
 }
 
-/* A rocket flies when: an engine is at the bottom, a nose is on top, at least one body is in between
-   (extra engines may sit between bodies as stages), everything is the right way up, and it has 3+ fins. */
+/* A rocket flies when: an engine is at the bottom, a nose is on top, anything in between is a body or an engine,
+   everything is the right way up, and it has at least MIN_FINS fins. Gadgets and stickers never matter. */
 function evaluate() {
   const bad = new Set(), missing = new Set(), n = stack.length, role = (p) => ROLE[p.type];
   stack.forEach((p, i) => {
     const r = role(p), ok = i === 0 ? r === 'engine' : i === n - 1 ? r === 'nose' : r === 'body' || r === 'engine';
     if (!ok || !upright(p)) bad.add(p);
   });
-  for (const r of ['engine', 'body', 'nose']) if (!stack.some((p) => role(p) === r)) missing.add(r);
+  for (const r of ['engine', 'nose']) if (!stack.some((p) => role(p) === r)) missing.add(r);
   const side = sideSlots.filter(Boolean);
   side.forEach((s) => { if (!upright(s)) bad.add(s); });
-  if (side.filter((s) => role(s) === 'fin').length < 3) missing.add('fin');
+  if (side.filter((s) => role(s) === 'fin').length < MIN_FINS) missing.add('fin');
   const engines = [...stack.filter((p) => role(p) === 'engine'), ...side.filter((s) => role(s) === 'booster')];
   const working = engines.filter(upright), thrust = working.reduce((a, p) => a + THRUST[p.type], 0);
   const mass = stack.length + side.length * 0.25;
@@ -1407,11 +1530,14 @@ function updateParts(dt, time) {
     else if (p.body.scale.x !== 1) p.body.scale.setScalar(1);
     if (p.flash > 0) {
       p.flash -= dt; const a = p.flash > 0 ? (0.5 + 0.5 * Math.sin(time * 12)) * Math.min(1, p.flash) : 0;
-      p.group.traverse((o) => { if (o.isMesh && o.material.emissive && !o.userData.sticker) { if (!o.material.userData.em) o.material.userData.em = o.material.emissive.clone(); o.material.emissive.copy(o.material.userData.em).lerp(new THREE.Color(0.95, 0.08, 0.04), a); } });
+      p.group.traverse((o) => { if (o.isMesh && o.material.emissive && !o.userData.decor) { if (!o.material.userData.em) o.material.userData.em = o.material.emissive.clone(); o.material.emissive.copy(o.material.userData.em).lerp(new THREE.Color(0.95, 0.08, 0.04), a); } });
     }
   }
   for (const s of allStickers) {
-    const b = s.userData.bounce; if (b <= 0 || (drag && drag.sticker === s)) continue;
+    const u = s.userData;
+    if (u.spin) u.spin.rotation.z += dt * u.spinSpeed;
+    if (u.blink) u.blink.emissiveIntensity = Math.sin(time * u.blinkSpeed + u.phase) > 0.2 ? 2.2 : 0.15;
+    const b = u.bounce; if (b <= 0 || (drag && drag.sticker === s)) continue;
     s.userData.bounce = Math.max(0, b - dt * 2.5); s.scale.setScalar(1 + Math.sin((1 - s.userData.bounce) * Math.PI * 3) * s.userData.bounce * 0.3);
   }
   charAmt += (charTarget - charAmt) * (1 - Math.exp(-dt * (charTarget ? 2 : 3)));
@@ -1421,7 +1547,7 @@ function updateBuild(dt) {
   if (!drag && !press && activePointer === null) idleT += dt; else idleT = 0;
   if (idleT > (parts.length ? 10 : 3)) { idleT = 0; showDragHint(); }
   const fins = sideSlots.filter((s) => s && ROLE[s.type] === 'fin').length, has = (r) => stack.some((p) => ROLE[p.type] === r);
-  launchBtn.classList.toggle('ready', has('engine') && has('body') && has('nose') && fins >= 3);
+  launchBtn.classList.toggle('ready', has('engine') && has('nose') && fins >= MIN_FINS);
   if (scorch.visible) { scorch.material.opacity -= dt * 0.35; if (scorch.material.opacity <= 0) scorch.visible = false; }
   camLookTarget = Math.max(BUILD_LOOK, layoutH * 0.5 + 0.3);        // keep tall rockets in view
   fitTarget = Math.max(8.4, layoutH + 3.6);
