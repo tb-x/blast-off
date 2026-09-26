@@ -3,11 +3,13 @@
 A 3D rocket-building game for young kids (around age 5), made for phones and tablets.
 
 - Drag engines, boosters, rocket bodies, noses, fins and wings from the tray onto the launch pad.
+- Add pipe junctions to branch out: each pipe arm ends in a glowing socket where a new tower can be built, above the arm or hanging below it. Tap a junction to swing its arms around.
 - Tap a part to turn it. Parts often arrive upside down or sideways.
+- Pick a pilot (astronaut, cat, dog, robot, alien or bunny) and drop them into a cockpit or cabin.
 - Decorate with gadgets (radar dish, blinking lights, headlights, fans, antenna, solar panel) and stickers. They're just for fun.
-- Press **GO** for a spoken countdown. A complete rocket blasts off into space; an incomplete one crashes and bursts into flames. Tap the wrench to rebuild it: wrong parts glow red.
+- Press **GO** for a spoken countdown. A good rocket blasts off into space and floats back down on a parachute. A broken one crashes and bursts into flames (the pilots parachute to safety). The OOPS screen shows what was wrong, and after tapping the wrench, markers point at each problem until it's fixed.
 
-A rocket flies when it has an engine at the bottom, a nose on top, at least 2 fins, and every part the right way up. Anything in between can be bodies or extra engines, up to 10 parts tall. More engines make it fly faster.
+A rocket flies when the main tower has an engine at the bottom and a nose on top, noses sit only at the top of a tower, every part is the right way up, it has at least 2 fins, and a pilot is on board. More engines make it fly faster, including engines on branch towers.
 
 ## Run it
 
