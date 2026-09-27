@@ -619,7 +619,7 @@ const BUILD = {
     const g = new THREE.Group();
     g.add(mesh(new THREE.CylinderGeometry(0.8, 0.8, 2.2, 40), std('#f5f7ff')));
     band(0.83, 0.16, 0.98, '#2f6bff', g); band(0.83, 0.16, -0.98, '#2f6bff', g);
-    for (let i = 0; i < 8; i += 2) { const s = mesh(new THREE.CylinderGeometry(0.812, 0.812, 0.36, 8, 1, true, i * TAU / 8, TAU / 8), std('#20243d', { side: THREE.DoubleSide })); s.position.y = 0.45; g.add(s); }
+    for (let i = 0; i < 8; i += 2) { const s = mesh(new THREE.CylinderGeometry(0.812, 0.812, 0.36, 8, 1, true, i * TAU / 8, TAU / 8), std('#20243d', { side: THREE.DoubleSide })); g.add(s); }   // centred, so the tank looks the same either way up
     return g;
   },
   shortTank() {
@@ -639,7 +639,7 @@ const BUILD = {
       const back = mesh(new THREE.CircleGeometry(0.37, 28), std('#1b2a66', { roughness: 0.9 })); back.position.z = 0.005; w.add(back);
       const rim = mesh(new THREE.TorusGeometry(0.36, 0.06, 10, 32), std('#b3bdd2', { metalness: 0.4, roughness: 0.3 })); rim.position.z = 0.13; w.add(rim);
       w.add(glassDisc(0.36, 0.13));
-      w.position.set(Math.sin(a) * 0.8, 0.05, Math.cos(a) * 0.8); w.rotation.y = a; g.add(w);
+      w.position.set(Math.sin(a) * 0.8, 0, Math.cos(a) * 0.8); w.rotation.y = a; g.add(w);
     }
     return g;
   },
@@ -874,7 +874,7 @@ function pilotHead(skin) {             // round head with eyes and a smile; each
 const GADGETS = ['radar', 'beacon', 'headlight', 'fan', 'antenna', 'solar'];
 const PILOTS = ['astronaut', 'cat', 'dog', 'robot', 'alien', 'bunny'];
 // where a pilot sits inside each crew part (in the part's own frame)
-const SEATS = { cabin: { pos: V(0, 0.05, 0.87), scale: V(0.85, 0.85, 0.25) }, cockpit: { pos: V(0, 0.12, 0.74), scale: V(0.8, 0.8, 0.8) } };
+const SEATS = { cabin: { pos: V(0, 0, 0.87), scale: V(0.85, 0.85, 0.25) }, cockpit: { pos: V(0, 0.12, 0.74), scale: V(0.8, 0.8, 0.8) } };
 // role decides where a part belongs; kind decides how it attaches
 const ROLE = {
   engine: 'engine', bigEngine: 'engine', tripleEngine: 'engine', booster: 'booster',
@@ -965,7 +965,9 @@ function seatPilot(p, type) {
 function unseatPilot(p) { if (p.pilot) { disposeTree(p.pilot.obj); p.pilot = null; } }
 function disposeTree(o) { o.removeFromParent(); o.traverse((m) => { if (m.isMesh) { m.geometry.dispose(); m.material.dispose(); } }); }
 const upVec = (p) => V(0, 1, 0).applyQuaternion(p.targetPivotQuat);
-const upright = (p) => upVec(p).y > 0.9;
+// parts that look the same either way up (tanks, pipes, the cabin) are fine upside down; only sideways is wrong for them
+const SYMMETRIC = new Set(['tank', 'shortTank', 'longTank', 'fatTank', 'cabin', 'pipe', 'tee', 'cross']);
+const upright = (p) => (SYMMETRIC.has(p.type) ? Math.abs(upVec(p).y) : upVec(p).y) > 0.9;
 const effH = (p) => (Math.abs(upVec(p).y) > 0.7 ? DIMS[p.type].h : DIMS[p.type].w);
 const stackHeight = () => mainChain.top;
 
@@ -2000,6 +2002,7 @@ function updateParts(dt, time) {
       const pl = p.pilot, seat = SEATS[p.type]; pl.bounce = Math.max(0, pl.bounce - dt * 2.5);
       pl.obj.scale.copy(seat.scale).multiplyScalar(1 + Math.sin((1 - pl.bounce) * Math.PI * 3) * pl.bounce * 0.3);
       pl.obj.position.y = seat.pos.y + Math.sin(time * 2.2 + p.id) * 0.015;
+      pl.obj.rotation.z = upVec(p).y < -0.5 ? Math.PI : 0;       // in a flipped cabin the pilot turns to stay face-up
     }
     if (p.flash > 0) {
       p.flash -= dt; const a = p.flash > 0 ? (0.5 + 0.5 * Math.sin(time * 12)) * Math.min(1, p.flash) : 0;
