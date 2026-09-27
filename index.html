@@ -12,7 +12,8 @@
   :root{
     --navy:#16225e; --blue:#2447b8; --red:#ff3b2f; --yellow:#ffd23f; --ink:#141a3d; --green:#3ccf6a;
     --gap:8px;
-    --tile:min(84px, calc((100vw - 24px - 40px - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)) / 6));
+    --tile:min(84px, calc((100vw - 24px - 40px - 20px - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)) / 6));
+    --panel:#3b63e0;
     color-scheme: light;
   }
   *{box-sizing:border-box}
@@ -26,28 +27,32 @@
   #c{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
 
   /* ---------- blueprint tray ---------- */
-  #tray{flex:none;position:relative;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;
+  #tray{flex:none;position:relative;display:flex;flex-direction:column;gap:0;align-items:center;justify-content:center;
     padding:18px calc(12px + env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) calc(12px + env(safe-area-inset-left,0px));
     background-color:var(--blue);
     background-image:linear-gradient(rgba(255,255,255,.09) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.09) 1px,transparent 1px);
     background-size:18px 18px}
   #tray::before{content:"";position:absolute;left:0;right:0;top:0;height:7px;
     background:repeating-linear-gradient(-45deg,var(--yellow) 0 12px,var(--ink) 12px 24px)}
-  #tabs{display:grid;grid-template-columns:repeat(8,1fr);gap:var(--gap);width:calc(6 * var(--tile) + 5 * var(--gap))}
-  .tab{height:calc(var(--tile) * .66);border-radius:14px;border:2.5px solid rgba(255,255,255,.35);background:rgba(10,20,70,.35);
-    display:grid;place-items:center;padding:0;cursor:pointer;touch-action:manipulation}
-  .tab img{height:82%;width:82%;object-fit:contain;pointer-events:none}
-  .tab.on{background:var(--yellow);border-color:#fff;box-shadow:0 4px 0 #c79400}
+  /* category tabs look like folder tabs on the parts box (flat white shapes), not like pieces */
+  #tabs{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;width:calc(6 * var(--tile) + 5 * var(--gap) + 20px)}
+  .tab{height:calc(var(--tile) * .6);border-radius:14px 14px 0 0;border:none;background:rgba(10,20,70,.35);
+    display:grid;place-items:center;padding:0;cursor:pointer;touch-action:none}
+  .tab img{height:70%;width:70%;object-fit:contain;pointer-events:none;filter:brightness(0) invert(1);opacity:.55}
+  .tab.on{background:var(--panel)}
+  .tab.on img{opacity:1}
+  #items{background:var(--panel);border-radius:0 0 20px 20px;padding:10px;box-shadow:0 5px 0 rgba(10,20,70,.35)}
   .tab:focus-visible{outline:4px solid #fff;outline-offset:2px}
   .tab.nudge{animation:nudge .55s ease 5;border-color:var(--yellow);box-shadow:0 0 0 5px rgba(255,210,63,.7)}
   .row{display:flex;justify-content:center;gap:var(--gap);width:calc(6 * var(--tile) + 5 * var(--gap));height:var(--tile)}
   @media (min-aspect-ratio: 5/4){
-    :root{--tile:min(84px, calc((100dvh - 24px - 40px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) / 6))}
+    :root{--tile:min(84px, calc((100dvh - 24px - 40px - 20px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) / 6))}
     #app{flex-direction:row}
     #tray{flex-direction:row;padding:calc(12px + env(safe-area-inset-top,0px)) calc(12px + env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) 19px}
     #tray::before{right:auto;bottom:0;width:7px;height:auto}
-    #tabs{grid-template-columns:none;grid-template-rows:repeat(8,1fr);width:auto;height:calc(6 * var(--tile) + 5 * var(--gap))}
-    .tab{height:auto;width:calc(var(--tile) * .72)}
+    #tabs{grid-template-columns:none;grid-template-rows:repeat(8,1fr);width:auto;height:calc(6 * var(--tile) + 5 * var(--gap) + 20px)}
+    .tab{height:auto;width:calc(var(--tile) * .66);border-radius:14px 0 0 14px}
+    #items{border-radius:0 20px 20px 0}
     .row{flex-direction:column;width:var(--tile);height:calc(6 * var(--tile) + 5 * var(--gap))}
   }
   .tile{width:var(--tile);height:var(--tile);border-radius:22%;position:relative;display:grid;place-items:center;
@@ -111,7 +116,7 @@
   @keyframes markpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
   .probs{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;max-width:min(92%,480px)}
   #result.win .probs{display:none}
-  .prob{width:74px;height:74px;border-radius:20px;background:#fff;position:relative;border:3px solid #fff;
+  .prob{width:96px;height:96px;border-radius:20px;background:#fff;position:relative;border:3px solid #fff;
     box-shadow:0 5px 0 rgba(20,26,61,.3);animation:titlepop .45s cubic-bezier(.2,1.7,.4,1) both}
   .prob.missing{background:rgba(255,255,255,.88);border:3px dashed var(--red)}
   .prob img{width:100%;height:100%;object-fit:contain;padding:6px}
@@ -1175,7 +1180,16 @@ function setTab(id) {
 for (const c of CATS) {
   const b = document.createElement('button'); b.className = 'tab'; b.setAttribute('role', 'tab'); b.setAttribute('aria-label', c.label);
   const img = document.createElement('img'); img.alt = ''; img.src = c.icon ? partThumb(c.icon, new THREE.Quaternion()) : stickerURL.star; b.appendChild(img);
-  b.addEventListener('click', () => { if (state !== 'build') return; sfx.init(); sfx.pick(); setTab(c.id); hideHand(); idleT = 0; });
+  // tap a tab to open that box; kids often drag the tab itself, so a drag picks up the box's first piece
+  b.addEventListener('pointerdown', (e) => {
+    if (state !== 'build' || activePointer !== null) return;
+    e.preventDefault(); sfx.init();
+    activePointer = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+    press = { kind: 'tile', tile: rowEls[c.id].querySelector('.tile'), tab: c.id, x0: e.clientX, y0: e.clientY, moved: false };
+    try { b.setPointerCapture(e.pointerId); } catch {}
+    hideHand();
+  });
+  b.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && state === 'build') { e.preventDefault(); sfx.init(); sfx.pick(); setTab(c.id); } });
   b.addEventListener('animationend', () => b.classList.remove('nudge'));
   tabsEl.appendChild(b); tabEls[c.id] = b;
   const row = document.createElement('div'); row.className = 'row' + (c.id === 'stickers' ? ' stickers' : ''); itemsEl.appendChild(row); rowEls[c.id] = row;
@@ -1252,7 +1266,8 @@ function endPointer(e) {
   if (drag) { if (e.type === 'pointercancel') drag.target = null; else updateDrag(e.clientX, e.clientY); drop(); }   // aim at where the finger lifted
   else if (orbit) { turnVel = performance.now() - orbit.t < 90 ? clamp(orbit.v, -9, 9) : 0; orbit = null; }
   else if (press && !press.moved) {
-    if (press.kind === 'tile') tapAdd(press.tile);
+    if (press.tab) { sfx.pick(); setTab(press.tab); }
+    else if (press.kind === 'tile') tapAdd(press.tile);
     else if (press.hit?.part) rotatePart(press.hit.part);
     else if (press.hit?.sticker) { press.hit.sticker.userData.bounce = 1; sfx.boop(); }
     else if (press.hit?.pilot?.pilot) { press.hit.pilot.pilot.bounce = 1; sfx.giggle(); }
@@ -1266,6 +1281,7 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 function beginFromPress() {
   const pr = press;
+  if (pr.tab) setTab(pr.tab);
   if (pr.kind === 'tile') {
     const t = pr.tile;
     if (t.dataset.type) { const p = makePart(t.dataset.type, t.quat); startDragPart(p, t); }
@@ -1406,13 +1422,21 @@ function rotatePart(p) {
   } else {
     let q;
     if (p.kind === 'side') q = new THREE.Quaternion().setFromAxisAngle(X, Math.PI / 2);
-    else {   // spin clockwise as seen by the player, whatever way the rocket is facing
-      const axis = V(camera.position.x, 0, camera.position.z).normalize().applyQuaternion(rocketRoot.getWorldQuaternion(new THREE.Quaternion()).invert());
+    else {   // turn about whichever of the rocket's own square axes faces the player most, so parts always stay square
+      const view = V(camera.position.x, 0, camera.position.z).applyQuaternion(rocketRoot.getWorldQuaternion(new THREE.Quaternion()).invert());
+      let axis = Math.abs(view.x) > Math.abs(view.z) ? V(Math.sign(view.x), 0, 0) : V(0, 0, Math.sign(view.z));
+      if (Math.abs(upVec(p).dot(axis)) > 0.9) axis = V(-axis.z, 0, axis.x);   // top points at the player: tip it over the other way so it can come upright
       q = new THREE.Quaternion().setFromAxisAngle(axis, -Math.PI / 2);
     }
-    p.targetPivotQuat.premultiply(q).normalize();
+    snapSquare(p.targetPivotQuat.premultiply(q));
   }
   layoutAll(); p.bounce = 0.6; sfx.turn(); hideHand();
+}
+// round a rotation to the nearest exact quarter-turn orientation, so small errors never build up
+function snapSquare(q) {
+  const m = new THREE.Matrix4().makeRotationFromQuaternion(q), e = m.elements;
+  for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) e[i] = Math.round(e[i]);
+  return q.setFromRotationMatrix(m).normalize();
 }
 // pick a free side spot: spread parts of the same kind evenly (every 120°), and prefer the side facing the player
 function bestSideSlot(type, ch = mainChain) {
@@ -1811,8 +1835,8 @@ function tryAgain() {
   const o = outcome;
   setTimeout(() => {            // point at every problem until it's fixed; the box with a missing kind of part bounces
     if (state !== 'build') return;
-    o.missing.forEach((r) => restartAnim(tabEls[ROLE_CAT[r]], 'nudge'));
-    if (o.missing.length) setTab(ROLE_CAT[o.missing[0]]);
+    const first = o.problems[0];                 // only the first problem gets pointed at
+    if (first?.kind === 'missing') { restartAnim(tabEls[ROLE_CAT[first.what]], 'nudge'); setTab(ROLE_CAT[first.what]); }
     fixMode = true; fixT = 0;
   }, 1300);
 }
@@ -1866,7 +1890,7 @@ function refreshHints() {
     Object.assign(m, { anchor, dx, dy });
   };
   let pilotSeat = null;
-  for (const pr of ev.problems) {
+  for (const pr of ev.problems.slice(0, 1)) {       // one hint at a time; the next shows up once this one is fixed
     if (pr.kind !== 'missing') {                    // a part that is upside down or in the wrong place
       const p = pr.part; p.flash = Math.max(p.flash, 0.6);
       mark(pr.kind + p.id, ICONS[pr.kind], () => p.group.getWorldPosition(V()), 62, 0, 'act');
@@ -1879,7 +1903,7 @@ function refreshHints() {
       mark('engine', thumbHTML('engine', ID_Q, 'plus'), () => rocketRoot.localToWorld(pos.clone()), 0, -72);
     } else if (pr.what === 'fin') {                 // ghost fins in the spots they'd snap to
       const temp = [];
-      for (let i = 0; i < Math.min(pr.count, hintFins.length); i++) {
+      for (let i = 0; i < 1; i++) {
         const k = bestSideSlot('fin'); if (k < 0) break;
         sideSlots[k] = { type: 'fin' }; temp.push(k);
         const pos = sideSlotPos(k, 'fin'); hintFins[i].position.copy(pos); hintFins[i].quaternion.copy(sideSlotQuat(k)); hintFins[i].visible = true;
@@ -1921,7 +1945,7 @@ function showResult(win) {
   resultEl.className = win ? 'win' : 'lose'; resultEl.hidden = false;
   $('#resTitle').textContent = win ? 'HOORAY!' : 'OOPS!';
   $('#btnAgain').hidden = !win; $('#btnNew2').hidden = !win; $('#btnFix').hidden = win;
-  if (!win) { fillProblemStrip(outcome.problems); const first = outcome.problems[0]; if (first) setTimeout(() => sfx.say(HINT_SAY[first.what || first.kind]), 500); }
+  if (!win) { fillProblemStrip(outcome.problems.slice(0, 1)); const first = outcome.problems[0]; if (first) setTimeout(() => sfx.say(HINT_SAY[first.what || first.kind]), 500); }
 }
 function addStar() { stars++; store.set('stars', stars); $('#starsN').textContent = stars; restartAnim($('#stars'), 'pop'); }
 function confetti() {
