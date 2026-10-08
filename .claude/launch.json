@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "blast-off",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5204"],
+      "port": 5204
+    }
+  ]
+}
