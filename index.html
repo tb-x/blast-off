@@ -148,6 +148,8 @@
   .bigbtn.alt{background:#fff;color:var(--blue);box-shadow:0 7px 0 #b8c3e6,0 12px 22px rgba(0,0,0,.2)}
   .bigbtn.no{background:#fff;color:var(--red);box-shadow:0 7px 0 #c9d2ee,0 12px 22px rgba(0,0,0,.2)}
   .bigbtn:active{transform:translateY(5px)}
+  #result .credit{margin-top:auto;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px));font:12px Verdana,Tahoma,sans-serif;
+    color:rgba(255,255,255,.8);text-shadow:0 1px 2px rgba(20,26,61,.7)}
   #confirm{position:absolute;inset:0;z-index:8;background:rgba(22,34,94,.6);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px}
   #confirm .q{width:110px;height:110px;border-radius:50%;background:var(--yellow);color:var(--ink);display:grid;place-items:center;box-shadow:0 7px 0 #d19f00}
   #confirm .q svg{width:66px;height:66px}
@@ -207,6 +209,7 @@
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </button>
       </div>
+      <div class="credit">Voices &amp; sounds: elevenlabs.io</div>
     </div>
 
     <div id="confirm" hidden>
@@ -256,16 +259,41 @@ const store = {
 function restartAnim(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
 
 /* ============================================================
-   Sound (all synthesized, no files)
+   Sound: ElevenLabs clips from assets/, with the synthesized
+   sounds and the device voice as fallback (e.g. on file://)
    ============================================================ */
+const ASSET_V = 1;            // bump after replacing any file in assets/
+const CLIP_VOL = 0.8;         // sound effect clips
+const VOICE_VOL = 1;          // spoken clips
+const CLIP_TRIM = {           // per-clip level trims, measured so the clips sit near the voice's loudness
+  'sfx-rewind': 0.3, 'sfx-warp-out': 0.35, 'sfx-wahwah': 0.45, 'sfx-warp-jump': 0.6, 'sfx-whoosh': 0.6,
+  'sfx-sputter': 0.7, 'sfx-warp-charge': 0.8, 'sfx-giggle': 0.85, 'sfx-nope': 1.6, 'sfx-poof': 1.3,
+};
+const RUMBLE_TRIM = 0.3;      // the engine rumble loop, which plays under the countdown
+const CLIPS = [
+  'sfx-pop', 'sfx-poof', 'sfx-nope', 'sfx-giggle', 'sfx-chute', 'sfx-thump', 'sfx-whoosh', 'sfx-rewind',
+  'sfx-warp-charge', 'sfx-warp-jump', 'sfx-warp-out', 'sfx-sputter', 'sfx-boom', 'sfx-fanfare', 'sfx-wahwah', 'sfx-rumble',
+  'say-astronaut', 'say-cat', 'say-dog', 'say-robot', 'say-alien', 'say-bunny',
+  'say-all-aboard', 'say-3', 'say-2', 'say-1', 'say-blast-off', 'say-hyperspeed', 'say-new-planet', 'say-wheee',
+  'hint-engine', 'hint-down', 'hint-nose', 'hint-up', 'hint-turn', 'hint-fin', 'hint-crew', 'hint-pilot',
+];
 const sfx = (() => {
-  let ac = null, out = null, noiseBuf = null, rumble = null, muted = store.get('muted', false);
+  let ac = null, out = null, noiseBuf = null, rumble = null, voice = null, muted = store.get('muted', false);
+  const raw = {}, clips = {};   // fetched bytes start loading now; decoding needs the AudioContext from the first tap
+  for (const n of CLIPS) raw[n] = fetch(`assets/${n}.mp3?v=${ASSET_V}`).then((r) => r.ok ? r.arrayBuffer() : null).catch(() => null);
   function init() {
     if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     ac = new AC(); out = ac.createGain(); out.gain.value = muted ? 0 : 0.7; out.connect(ac.destination);
     noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    for (const n of CLIPS) raw[n].then((b) => b && new Promise((res, rej) => ac.decodeAudioData(b, res, rej)))
+      .then((buf) => { if (buf) clips[n] = buf; }).catch(() => {});
+  }
+  function clip(name, vol = CLIP_VOL) {   // plays a loaded clip; returns null if it isn't loaded so the caller can synthesize
+    const buf = clips[name]; if (!ac || !buf) return null;
+    const s = ac.createBufferSource(), g = ac.createGain(); s.buffer = buf; g.gain.value = vol * (CLIP_TRIM[name] ?? 1);
+    s.connect(g).connect(out); s.start(); return s;
   }
   function tone(f0, f1, dur, type = 'sine', vol = 0.3, delay = 0) {
     if (!ac) return; const t = ac.currentTime + delay;
@@ -288,33 +316,37 @@ const sfx = (() => {
     init,
     get muted() { return muted; },
     toggle() { muted = !muted; store.set('muted', muted); if (out) out.gain.value = muted ? 0 : 0.7; if (muted) try { speechSynthesis.cancel(); } catch {} return muted; },
-    pop() { tone(480, 920, 0.12, 'sine', 0.35); tone(1400, 1500, 0.06, 'triangle', 0.08, 0.03); },
+    pop() { if (clip('sfx-pop')) return; tone(480, 920, 0.12, 'sine', 0.35); tone(1400, 1500, 0.06, 'triangle', 0.08, 0.03); },
     pick() { tone(380, 560, 0.08, 'triangle', 0.18); },
     turn() { tone(600, 980, 0.1, 'triangle', 0.22); noise(0.05, 0.12, 5000, 2500, 'highpass'); },
-    poof() { noise(0.3, 0.35, 1800, 300, 'bandpass', 0, 0.8); },
-    nope() { tone(260, 180, 0.16, 'square', 0.1); tone(200, 140, 0.2, 'square', 0.1, 0.13); },
+    poof() { if (clip('sfx-poof')) return; noise(0.3, 0.35, 1800, 300, 'bandpass', 0, 0.8); },
+    nope() { if (clip('sfx-nope')) return; tone(260, 180, 0.16, 'square', 0.1); tone(200, 140, 0.2, 'square', 0.1, 0.13); },
     boop() { tone(880, 620, 0.09, 'sine', 0.2); },
-    giggle() { [0, 0.09, 0.18].forEach((d, i) => tone(700 + i * 120, 1100 + i * 120, 0.07, 'triangle', 0.18, d)); },
-    chute() { noise(0.6, 0.45, 600, 2400, 'bandpass', 0, 0.8); tone(300, 520, 0.12, 'sine', 0.25, 0.05); },
-    thump() { tone(140, 50, 0.3, 'sine', 0.5); noise(0.25, 0.4, 900, 120, 'lowpass'); },
+    giggle() { if (clip('sfx-giggle')) return; [0, 0.09, 0.18].forEach((d, i) => tone(700 + i * 120, 1100 + i * 120, 0.07, 'triangle', 0.18, d)); },
+    chute() { if (clip('sfx-chute')) return; noise(0.6, 0.45, 600, 2400, 'bandpass', 0, 0.8); tone(300, 520, 0.12, 'sine', 0.25, 0.05); },
+    thump() { if (clip('sfx-thump')) return; tone(140, 50, 0.3, 'sine', 0.5); noise(0.25, 0.4, 900, 120, 'lowpass'); },
     beep() { tone(660, 660, 0.2, 'square', 0.12); },
     go() { tone(990, 990, 0.55, 'square', 0.12); tone(1320, 1320, 0.55, 'sine', 0.1); },
-    whoosh() { noise(1.6, 0.5, 250, 3200, 'bandpass', 0, 0.7); },
-    warpCharge() { tone(90, 900, 1.5, 'sawtooth', 0.1); tone(180, 1800, 1.5, 'sine', 0.06); noise(1.5, 0.25, 300, 4000, 'bandpass', 0, 1.5); },
-    warpJump() { noise(2.2, 0.75, 5000, 180, 'lowpass'); tone(1500, 70, 1.3, 'sawtooth', 0.12); tone(70, 38, 1.8, 'sine', 0.6); },
-    warpOut() { tone(1800, 260, 0.6, 'sine', 0.22); tone(900, 140, 0.6, 'triangle', 0.12); noise(0.7, 0.45, 3000, 300, 'bandpass', 0, 1); },
-    sputter() { noise(0.12, 0.45, 900, 200, 'lowpass'); tone(120, 60, 0.12, 'sawtooth', 0.12); },
-    boom() { noise(2.4, 1.0, 2200, 50, 'lowpass'); tone(110, 26, 1.3, 'sine', 0.9); noise(0.5, 0.6, 6000, 700, 'lowpass'); },
+    whoosh() { if (clip('sfx-whoosh')) return; noise(1.6, 0.5, 250, 3200, 'bandpass', 0, 0.7); },
+    warpCharge() { if (clip('sfx-warp-charge')) return; tone(90, 900, 1.5, 'sawtooth', 0.1); tone(180, 1800, 1.5, 'sine', 0.06); noise(1.5, 0.25, 300, 4000, 'bandpass', 0, 1.5); },
+    warpJump() { if (clip('sfx-warp-jump')) return; noise(2.2, 0.75, 5000, 180, 'lowpass'); tone(1500, 70, 1.3, 'sawtooth', 0.12); tone(70, 38, 1.8, 'sine', 0.6); },
+    warpOut() { if (clip('sfx-warp-out')) return; tone(1800, 260, 0.6, 'sine', 0.22); tone(900, 140, 0.6, 'triangle', 0.12); noise(0.7, 0.45, 3000, 300, 'bandpass', 0, 1); },
+    sputter() { if (clip('sfx-sputter')) return; noise(0.12, 0.45, 900, 200, 'lowpass'); tone(120, 60, 0.12, 'sawtooth', 0.12); },
+    boom() { if (clip('sfx-boom')) return; noise(2.4, 1.0, 2200, 50, 'lowpass'); tone(110, 26, 1.3, 'sine', 0.9); noise(0.5, 0.6, 6000, 700, 'lowpass'); },
     fanfare() {
+      if (clip('sfx-fanfare')) return;
       [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.22, 'triangle', 0.28, i * 0.14));
       [523, 659, 784].forEach((f) => tone(f, f, 1.0, 'triangle', 0.18, 0.64)); tone(1047, 1047, 1.0, 'square', 0.07, 0.64);
       for (let i = 0; i < 8; i++) tone(1800 + i * 150, 2400 + i * 150, 0.08, 'sine', 0.06, 1.1 + i * 0.07);
     },
-    wahwah() { [392, 370, 349].forEach((f, i) => tone(f, f * 0.98, 0.38, 'sawtooth', 0.11, i * 0.42)); tone(330, 240, 1.1, 'sawtooth', 0.11, 1.26); },
-    say(text) {             // spoken countdown via the browser's built-in voice
-      const ss = window.speechSynthesis; if (!ss || muted) return;
+    wahwah() { if (clip('sfx-wahwah')) return; [392, 370, 349].forEach((f, i) => tone(f, f * 0.98, 0.38, 'sawtooth', 0.11, i * 0.42)); tone(330, 240, 1.1, 'sawtooth', 0.11, 1.26); },
+    say(text, name) {       // spoken line: the recorded clip `name`, else the browser's built-in voice reads `text`
+      if (muted) return;
+      try { speechSynthesis.cancel(); } catch {}
+      if (voice) { try { voice.stop(); } catch {} voice = null; }
+      if (name && (voice = clip(name, VOICE_VOL))) return;
+      const ss = window.speechSynthesis; if (!ss) return;
       try {
-        ss.cancel();
         const u = new SpeechSynthesisUtterance(text);
         const voices = ss.getVoices(), en = voices.filter((v) => /^en/i.test(v.lang));
         u.voice = en.find((v) => /female|samantha|zira|aria|jenny|google us/i.test(v.name)) || en[0] || null;
@@ -322,14 +354,16 @@ const sfx = (() => {
         ss.speak(u);
       } catch {}
     },
-    rewind() { tone(300, 1300, 0.55, 'sine', 0.16); tone(450, 1800, 0.55, 'triangle', 0.06, 0.05); },
+    rewind() { if (clip('sfx-rewind')) return; tone(300, 1300, 0.55, 'sine', 0.16); tone(450, 1800, 0.55, 'triangle', 0.06, 0.05); },
     rumbleStart(level = 1) {
       if (!ac) return; this.rumbleStop();
-      const s = ac.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
-      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380;
+      const loop = clips['sfx-rumble'], s = ac.createBufferSource(); s.buffer = loop || noiseBuf; s.loop = true;
+      if (loop) { s.loopStart = 0.05; s.loopEnd = loop.duration - 0.05; }   // skip the MP3 padding so the loop has no gap
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = loop ? 3000 : 380;
+      const trim = ac.createGain(); trim.gain.value = loop ? RUMBLE_TRIM : 1;
       const g = ac.createGain(); const t = ac.currentTime;
       g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.6 * level, t + 0.6);
-      s.connect(f).connect(g).connect(out); s.start(); rumble = { s, g };
+      s.connect(f).connect(trim).connect(g).connect(out); s.start(); rumble = { s, g };
     },
     rumbleSet(v) { if (rumble) rumble.g.gain.setTargetAtTime(Math.max(0.0001, v), ac.currentTime, 0.1); },
     rumbleStop() {
@@ -578,43 +612,71 @@ function showSite(s) {
 const pickOther = (list, cur) => { const o = list.filter((x) => x !== cur); return o[Math.floor(Math.random() * o.length)]; };
 
 /* ---------- alien planets: one is picked for every flight; the same props are recoloured and switched on or off ---------- */
+// ground patterns: spots, speckle, dunes, cracks (glowing lava). F lists which features a planet has; aliens lists who lives there.
 const PLANETS = [
-  { id: 'candy', sky: ['#5b2bd1', '#ffa3d2'], hemi: [0xffd9f2, 0x3d8f86], sun: 0xffd8c0, ground: '#3fc4b0', crater: '#2f9c8e', rock: '#8d6fc9', ring: '#7dfff0',
-    hills: ['#7a5bd0', '#6447b8', '#8f6fe0'], caps: ['#ff7a3d', '#ffd23f', '#ff5fa2', '#7dfff0'], crystals: ['#7dfff0', '#a98bff', '#5fd0ff'],
-    bands: ['#ffcf7a', '#ff9f5a', '#ffe3a8', '#f08a5d', '#ffd08a'], moons: ['#c9f7ff', '#ffb3e6'], shrooms: true, gems: true, rings: true },
-  { id: 'ice', sky: ['#1d4fb8', '#c4f1ff'], hemi: [0xe6f6ff, 0x9cc8e6], sun: 0xe8f4ff, ground: '#e3f4ff', crater: '#a9d3ef', rock: '#9cc3e0', ring: '#5fd0ff',
-    hills: ['#bfe3f7', '#a6d3f0', '#d6eefb'], caps: ['#5fd0ff', '#ffffff', '#a98bff', '#7fb8ff'], crystals: ['#9fe8ff', '#ffffff', '#7fb8ff'],
-    bands: ['#9fd0ff', '#d6ecff', '#7fb0e8', '#bfe0ff', '#e8f4ff'], moons: ['#ffffff', '#b8d8ff'], shrooms: false, gems: true, rings: true },
-  { id: 'lava', sky: ['#2a0a2e', '#ff8a4c'], hemi: [0xffc0a0, 0x5a2030], sun: 0xffb080, ground: '#4a2633', crater: '#ff6a2a', rock: '#6b3a44', ring: '#ffd23f',
-    hills: ['#7a2e3a', '#5e2230', '#8a3a3a'], caps: ['#ffb13d', '#ff6a2a', '#ffe14d', '#ff5fa2'], crystals: ['#ffb13d', '#ff6a2a', '#ffe14d'],
-    bands: ['#ff9f5a', '#c8553d', '#ffcf7a', '#a83f3a', '#ff7a3d'], moons: ['#ffd8a8', '#ff9f9f'], shrooms: false, gems: true, rings: false },
-  { id: 'jungle', sky: ['#0f7a6a', '#e0ff9e'], hemi: [0xeaffd0, 0x3e8f3a], sun: 0xfff6c8, ground: '#7bd14a', crater: '#5aa83a', rock: '#5f8f6a', ring: '#ffe14d',
-    hills: ['#3e9e48', '#2f8a5a', '#56b04e'], caps: ['#5fd0ff', '#ff5fa2', '#a98bff', '#ffd23f'], crystals: ['#ffe14d', '#ff5fa2', '#5fd0ff'],
-    bands: ['#9fe870', '#5fc0a0', '#d8ff9a', '#4fa080', '#bff07a'], moons: ['#fff3b0', '#c9f7ff'], shrooms: true, gems: false, rings: true },
-  { id: 'sunset', sky: ['#ff5f3d', '#ffe28a'], hemi: [0xffe6c4, 0xc98a3a], sun: 0xffe0b0, ground: '#e8b25a', crater: '#c98a3a', rock: '#c46a3a', ring: '#ff5fa2',
-    hills: ['#c98a3a', '#b5702e', '#dc9a48'], caps: ['#ff5fa2', '#7dfff0', '#a98bff', '#ffffff'], crystals: ['#7dfff0', '#5fd0ff', '#ffffff'],
-    bands: ['#a98bff', '#7a5bd0', '#c9b8ff', '#6447b8', '#d8c8ff'], moons: ['#ffffff', '#ffb3e6'], shrooms: true, gems: true, rings: true },
-  { id: 'bubblegum', sky: ['#ff6fcf', '#fff2a8'], hemi: [0xfff0fa, 0x9a6fd8], sun: 0xfff0e0, ground: '#b08cff', crater: '#8f6fe0', rock: '#ff9fd8', ring: '#ffffff',
-    hills: ['#ff9fd8', '#ffb8e2', '#d8a8ff'], caps: ['#7dfff0', '#ffe14d', '#ffffff', '#5fd0ff'], crystals: ['#ffffff', '#7dfff0', '#ffe14d'],
-    bands: ['#7dfff0', '#5fd0ff', '#c9f7ff', '#3fc4b0', '#a0f0ff'], moons: ['#ffe14d', '#ffffff'], shrooms: true, gems: true, rings: true },
+  { id: 'candy', sky: ['#5b2bd1', '#ffa3d2'], hemi: [0xffd9f2, 0x3d8f86], sun: 0xffd8c0, stars: 0.15,
+    ground: '#3fc4b0', ground2: '#2fa596', pattern: 'spots', rim: '#5ad8c4', crater: '#23786d', rock: '#8d6fc9', spire: '#a07be0', ring: '#7dfff0',
+    hills: ['#7a5bd0', '#6447b8', '#8f6fe0'], caps: ['#ff7a3d', '#ffd23f', '#ff5fa2', '#7dfff0'], crystals: ['#7dfff0', '#a98bff', '#5fd0ff'], bulbs: ['#ffe14d', '#ff5fa2', '#7dfff0'],
+    bands: ['#ffcf7a', '#ff9f5a', '#ffe3a8', '#f08a5d', '#ffd08a'], moons: ['#c9f7ff', '#ffb3e6'], rings: true, suns: [['#fff0a0', 40]],
+    F: ['shrooms', 'gems', 'floaters'], aliens: ['blob', 'octo', 'saucer'] },
+  { id: 'aurora', sky: ['#041a3a', '#5effc8'], hemi: [0xd8f6ff, 0x7aa8c8], sun: 0xd8f0ff, stars: 0.6,
+    ground: '#dff4ff', ground2: '#b4dcf2', pattern: 'speckle', rim: '#f2fbff', crater: '#8fbedd', rock: '#9cc3e0', spire: '#c4e6fb', ring: '#5fd0ff',
+    hills: ['#bfe3f7', '#a6d3f0', '#d6eefb'], caps: ['#5fd0ff', '#ffffff', '#a98bff', '#7fb8ff'], crystals: ['#9fe8ff', '#ffffff', '#7fb8ff'], bulbs: ['#7dffd6', '#9fe8ff', '#ffffff'],
+    bands: ['#9fd0ff', '#d6ecff', '#7fb0e8', '#bfe0ff', '#e8f4ff'], moons: ['#ffffff', '#b8d8ff'], rings: true, suns: [['#c8f0ff', 30], ['#ffd8f0', 18]],
+    F: ['gems', 'spires', 'bulbs'], aliens: ['jelly', 'bug', 'blob'] },
+  { id: 'lava', sky: ['#1a0410', '#ff6a2a'], hemi: [0xffc0a0, 0x5a2030], sun: 0xffb080, stars: 0.35,
+    ground: '#3a1f28', ground2: '#ff7a2a', pattern: 'cracks', rim: '#5a2e36', crater: '#ff6a2a', glow: 1, rock: '#4a2a33', spire: '#2a1418', ring: '#ffd23f',
+    hills: ['#4a1e28', '#3a1620', '#5a2a30'], caps: ['#ffb13d', '#ff6a2a', '#ffe14d', '#ff5fa2'], crystals: ['#ffb13d', '#ff6a2a', '#ffe14d'], bulbs: ['#ffb13d', '#ff6a2a', '#ffe14d'],
+    bands: ['#ff9f5a', '#c8553d', '#ffcf7a', '#a83f3a', '#ff7a3d'], moons: ['#ffd8a8', '#ff9f9f'], rings: false, suns: [['#ff9a5a', 50]],
+    F: ['gems', 'spires', 'floaters'], aliens: ['bug', 'stalk', 'saucer'] },
+  { id: 'jungle', sky: ['#06493f', '#d4ff7a'], hemi: [0xeaffd0, 0x3e8f3a], sun: 0xfff6c8, stars: 0.1,
+    ground: '#5fbf3a', ground2: '#3f9a2a', pattern: 'spots', rim: '#7fd65a', crater: '#2f6a22', rock: '#5f8f6a', spire: '#3e7a50', ring: '#ffe14d',
+    hills: ['#3e9e48', '#2f8a5a', '#56b04e'], caps: ['#5fd0ff', '#ff5fa2', '#a98bff', '#ffd23f'], crystals: ['#ffe14d', '#ff5fa2', '#5fd0ff'], bulbs: ['#ff5fa2', '#5fd0ff', '#ffe14d'],
+    bands: ['#9fe870', '#5fc0a0', '#d8ff9a', '#4fa080', '#bff07a'], moons: ['#fff3b0', '#c9f7ff'], rings: true, suns: [['#ffffff', 36], ['#ffe0a0', 22]],
+    F: ['shrooms', 'bulbs', 'arches'], aliens: ['stalk', 'octo', 'jelly'] },
+  { id: 'rust', sky: ['#7a2a10', '#ffc58a'], hemi: [0xffd8c0, 0x8a3424], sun: 0xe0f0ff, stars: 0.2,
+    ground: '#c4553a', ground2: '#a8432c', pattern: 'dunes', rim: '#d86a4c', crater: '#7a2e20', rock: '#9a3e2a', spire: '#b04a30', ring: '#ffd23f',
+    hills: ['#a8432c', '#b84e34', '#93392a'], caps: ['#ff5fa2', '#7dfff0', '#a98bff', '#ffffff'], crystals: ['#7dfff0', '#5fd0ff', '#ffffff'], bulbs: ['#7dfff0', '#ffffff', '#5fd0ff'],
+    bands: ['#a98bff', '#7a5bd0', '#c9b8ff', '#6447b8', '#d8c8ff'], moons: ['#d8c8b0', '#a89880'], rings: true, suns: [['#bfe4ff', 26]],
+    F: ['gems', 'spires', 'arches', 'craters'], aliens: ['blob', 'bug', 'saucer'] },
+  { id: 'bubblegum', sky: ['#ff4fc4', '#fff2a8'], hemi: [0xfff0fa, 0x9a6fd8], sun: 0xfff0e0, stars: 0,
+    ground: '#b08cff', ground2: '#9a74f0', pattern: 'spots', rim: '#c8a8ff', crater: '#6a4ac8', rock: '#ff9fd8', spire: '#ffb8e2', ring: '#ffffff',
+    hills: ['#ff9fd8', '#ffb8e2', '#d8a8ff'], caps: ['#7dfff0', '#ffe14d', '#ffffff', '#5fd0ff'], crystals: ['#ffffff', '#7dfff0', '#ffe14d'], bulbs: ['#ffe14d', '#7dfff0', '#ffffff'],
+    bands: ['#7dfff0', '#5fd0ff', '#c9f7ff', '#3fc4b0', '#a0f0ff'], moons: ['#ffe14d', '#ffffff'], rings: true, suns: [['#ffffff', 34]],
+    F: ['shrooms', 'gems', 'bulbs', 'floaters'], aliens: ['octo', 'jelly', 'blob'] },
+  { id: 'moon', sky: ['#000008', '#1c1c40'], hemi: [0xc8c8e8, 0x55556a], sun: 0xffffff, stars: 1,
+    ground: '#a9a9b8', ground2: '#8a8a9a', pattern: 'speckle', rim: '#c4c4d2', crater: '#6e6e80', rock: '#8a8a98', spire: '#9a9aa8', ring: '#7dfff0',
+    hills: ['#9a9aa8', '#8a8a98', '#b0b0bc'], caps: ['#ffffff', '#c9c9d9', '#a98bff', '#7dfff0'], crystals: ['#7dfff0', '#a98bff', '#ffffff'], bulbs: ['#7dfff0', '#ffffff', '#a98bff'],
+    bands: ['#2f7fd6', '#5fc06a', '#3f8cff', '#ffffff', '#2f7fd6'], moons: ['#ffffff', '#c9c9d9'], rings: false, suns: [['#ffffff', 24]],   // Earth hangs in the black sky
+    F: ['gems', 'craters'], aliens: ['saucer', 'blob', 'bug'] },
 ];
 let planet = PLANETS[0];
 const AM = {};                                                 // the alien props' materials, recoloured for each planet
 const alien = new THREE.Group(); alien.visible = false; scene.add(alien);
 const alienSky = new THREE.Group(); alienSky.visible = false; sky.add(alienSky);   // rides with the sky, so it stays far away
-const shrooms = new THREE.Group(), gems = new THREE.Group(); alien.add(shrooms, gems);
-const blobs = [];
+const FEAT = Object.fromEntries(['shrooms', 'gems', 'bulbs', 'spires', 'arches', 'floaters', 'craters'].map((k) => { const g = new THREE.Group(); alien.add(g); return [k, g]; }));
+const crowd = [], floaters = [];
 {
-  AM.ground = std('#3fc4b0', { roughness: 0.95 });
+  AM.groundTex = canvasTex(256, 256, () => {}); AM.groundTex.wrapS = AM.groundTex.wrapT = THREE.RepeatWrapping; AM.groundTex.repeat.set(60, 60);
+  AM.ground = std('#ffffff', { map: AM.groundTex, roughness: 0.95 });
   const ground = mesh(new THREE.CircleGeometry(320, 64), AM.ground, false); ground.rotation.x = -Math.PI / 2; ground.position.y = -0.35; alien.add(ground);
   AM.rock = std('#8d6fc9', { roughness: 0.9, flatShading: true });
   const rock = mesh(new THREE.CylinderGeometry(2.0, 2.5, 0.6, 9), AM.rock, false); rock.position.y = -0.3; alien.add(rock);   // flat-topped landing rock, as high as the pad at home
   AM.ring = new THREE.MeshBasicMaterial({ color: '#7dfff0' });
   const landRing = new THREE.Mesh(new THREE.RingGeometry(1.45, 1.62, 48), AM.ring); landRing.rotation.x = -Math.PI / 2; landRing.position.y = 0.01; alien.add(landRing);
-  AM.crater = new THREE.MeshBasicMaterial({ color: '#2f9c8e', transparent: true, opacity: 0.75, depthWrite: false });
-  [[-5.5, 4, 1.1], [6, 3, 0.8], [-8, -1, 1.4], [3.5, 7, 0.6], [9, 6, 1.2]].forEach(([x, z, r]) => {
-    const c = new THREE.Mesh(new THREE.CircleGeometry(r, 32), AM.crater); c.rotation.x = -Math.PI / 2; c.position.set(x, -0.34, z); alien.add(c);
-  });
+
+  // craters: a raised rim around a darker floor (the floor glows on the lava planet)
+  AM.rim = std('#5ad8c4', { roughness: 1 }); AM.crater = std('#23786d', { roughness: 1 });
+  const rimGeo = new THREE.LatheGeometry([[0.66, 0], [0.8, 0.16], [0.9, 0.2], [1.0, 0.14], [1.2, 0.03], [1.38, 0]].map(([x, y]) => new THREE.Vector2(x, y)), 40);
+  const floorGeo = new THREE.CircleGeometry(0.72, 32);
+  const crater = (g, x, z, r, h = 1) => {
+    const c = new THREE.Group(), rim = mesh(rimGeo, AM.rim, false), fl = mesh(floorGeo, AM.crater, false);
+    fl.rotation.x = -Math.PI / 2; fl.position.y = 0.012; c.add(rim, fl);
+    c.position.set(x, -0.35, z); c.scale.set(r, r * h, r); g.add(c);
+  };
+  [[-6.2, 3.6, 1.5], [6.6, 2.6, 1.2], [-9.5, -2.5, 2.4], [8.5, -5, 2], [3.4, 7.5, 0.8], [-4.2, 8, 1], [-26, -30, 7, 0.6], [30, -40, 9, 0.6], [2, -62, 13, 0.5], [-52, -18, 10, 0.6], [46, -14, 6, 0.7]]
+    .forEach(([x, z, r, h]) => crater(alien, x, z, r, h));
+  for (let k = 0; k < 18; k++) { const [x, z] = spotOff(6, 60); crater(FEAT.craters, x, z, rand(0.8, 4), rand(0.6, 1.1)); }   // pock-marked planets get many more
 
   // glowing mushrooms with white spots
   AM.caps = [0, 1, 2, 3].map(() => std('#ffffff', { emissiveIntensity: 0.35, roughness: 0.6 }));
@@ -625,9 +687,9 @@ const blobs = [];
     const stem = mesh(stemGeo, stemMat); stem.scale.y = h; stem.position.y = 0.55 * h; m.add(stem);
     const cap = mesh(capGeo, AM.caps[k % 4]); cap.position.y = 1.1 * h - 0.05; cap.scale.y = 0.7; m.add(cap);
     for (let i = 0; i < 4; i++) { const a = i / 4 * TAU + rand(0, 1), d = mesh(spotGeo, spotMat); d.position.set(Math.cos(a) * 0.5, cap.position.y + 0.38, Math.sin(a) * 0.5); m.add(d); }
-    place(shrooms, m, x, -0.35, z, rand(0.9, 1.8));
+    place(FEAT.shrooms, m, x, -0.35, z, rand(0.9, 1.8));
   }
-  // crystal clusters and boulders
+  // crystal clusters
   AM.crystals = [0, 1, 2].map(() => std('#ffffff', { emissiveIntensity: 0.5, roughness: 0.2, flatShading: true }));
   const crysGeo = new THREE.OctahedronGeometry(0.5, 0);
   for (let k = 0; k < 14; k++) {
@@ -636,68 +698,232 @@ const blobs = [];
       const c = mesh(crysGeo, AM.crystals[(k + i) % 3]); c.scale.set(rand(0.4, 0.7), rand(1.4, 2.6), rand(0.4, 0.7));
       c.position.set(rand(-0.5, 0.5), 0.5, rand(-0.5, 0.5)); c.rotation.set(rand(-0.4, 0.4), rand(0, TAU), rand(-0.4, 0.4)); cl.add(c);
     }
-    place(gems, cl, x, -0.35, z, rand(0.8, 1.6));
+    place(FEAT.gems, cl, x, -0.35, z, rand(0.8, 1.6));
+  }
+  // bulb plants: thin stems with glowing balls on top
+  AM.bulbs = [0, 1, 2].map(() => std('#ffffff', { emissiveIntensity: 0.9, roughness: 0.4 }));
+  const bulbStem = std('#2f6a5a', { roughness: 0.8 }), stalkGeo = new THREE.CylinderGeometry(0.04, 0.06, 1, 6), orbGeo = new THREE.SphereGeometry(0.22, 14, 10);
+  for (let k = 0; k < 16; k++) {
+    const [x, z] = spotOff(6, 32), cl = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const h = rand(1.2, 2.8), s = mesh(stalkGeo, bulbStem), o = mesh(orbGeo, AM.bulbs[(k + i) % 3]), dx = rand(-0.4, 0.4), dz = rand(-0.4, 0.4);
+      s.scale.y = h; s.position.set(dx, h / 2, dz); s.rotation.set(dz * 0.3, 0, -dx * 0.3); o.position.set(dx * 1.3, h, dz * 1.3); cl.add(s, o);
+    }
+    place(FEAT.bulbs, cl, x, -0.35, z, rand(0.9, 1.5));
+  }
+  // tall rock spires and rock arches
+  AM.spire = std('#a07be0', { roughness: 0.9, flatShading: true });
+  const spireGeo = new THREE.ConeGeometry(1, 1, 6);
+  for (let k = 0; k < 12; k++) {
+    const [x, z] = spotOff(14, 55, 12), h = rand(6, 18), r = rand(0.8, 2), s = mesh(spireGeo, AM.spire, false);
+    s.scale.set(r, h, r); s.position.set(x, -0.35 + h / 2, z); s.rotation.set(rand(-0.08, 0.08), rand(0, TAU), rand(-0.08, 0.08)); FEAT.spires.add(s);
+  }
+  const archGeo = new THREE.TorusGeometry(1, 0.2, 10, 28, Math.PI);
+  for (let k = 0; k < 3; k++) { const [x, z] = spotOff(16, 40, 12), a = mesh(archGeo, AM.rock, false); a.position.set(x, -0.35, z); a.scale.setScalar(rand(4, 7)); a.rotation.y = rand(0, TAU); FEAT.arches.add(a); }
+  // rocks floating in the air, bobbing slowly
+  for (let k = 0; k < 9; k++) {
+    const [x, z] = spotOff(10, 40, 10), b = mesh(PG.rock, AM.rock); b.position.set(x, rand(5, 14), z); b.scale.setScalar(rand(1.2, 3.2)); b.rotation.set(rand(0, TAU), rand(0, TAU), 0);
+    FEAT.floaters.add(b); floaters.push({ b, y: b.position.y, ph: rand(0, TAU) });
   }
   for (let k = 0; k < 10; k++) { const [x, z] = spotOff(4.5, 20), b = mesh(PG.rock, AM.rock); b.position.set(x, -0.25, z); b.scale.set(rand(0.6, 1.5), rand(0.5, 1), rand(0.6, 1.5)); b.rotation.y = rand(0, TAU); alien.add(b); }
   AM.hills = hills(alien, ['#7a5bd0', '#6447b8', '#8f6fe0'], [[-60, -90, 30, 22], [10, -120, 46, 30], [70, -85, 30, 18], [-110, -40, 36, 20], [110, -30, 36, 24]]);
 
-  // little aliens who wait by the landing rock and jump for joy when the rocket lands
-  const makeBlob = (col) => {
-    const g = new THREE.Group(), body = mesh(new THREE.SphereGeometry(0.42, 20, 14), std(col, { roughness: 0.5 }));
-    body.scale.set(1, 0.85, 1); body.position.y = 0.36; g.add(body);
-    const eye = mesh(new THREE.SphereGeometry(0.2, 16, 12), std('#ffffff', { roughness: 0.3 })); eye.position.set(0, 0.5, 0.3); g.add(eye);
-    const pupil = mesh(new THREE.SphereGeometry(0.1, 12, 10), std('#1b1b2a')); pupil.position.set(0, 0.52, 0.47); g.add(pupil);
-    for (const s of [-1, 1]) {
-      const stalk = mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.35, 6), std(col)); stalk.position.set(s * 0.18, 0.82, 0); stalk.rotation.z = -s * 0.35; g.add(stalk);
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), std('#ffe14d', { emissive: '#ffe14d', emissiveIntensity: 1.2 })); tip.position.set(s * 0.24, 0.98, 0); g.add(tip);
-    }
-    return g;
-  };
-  [[-3.1, 1.8, '#8cff6b'], [3.3, 1.3, '#ffb13d'], [-4.4, -1.4, '#ff7ad9'], [4.6, -1.8, '#6bd8ff']].forEach(([x, z, c], i) => {
-    const b = makeBlob(c); b.position.set(x, -0.35, z); b.rotation.y = -x * 0.12; b.scale.setScalar(1.3); alien.add(b); blobs.push({ g: b, phase: i * 1.3 });
-  });
-
-  // a giant banded planet (sometimes with rings) and two moons in the sky
+  // the sky: a giant banded planet (sometimes with rings), two moons and one or two suns
   AM.bands = canvasTex(64, 256, () => {});
-  AM.giant = new THREE.MeshStandardMaterial({ map: AM.bands, roughness: 1, emissiveIntensity: 0.3, fog: false });
-  const giant = new THREE.Mesh(new THREE.SphereGeometry(55, 40, 24), AM.giant);
+  AM.giant = new THREE.MeshStandardMaterial({ map: AM.bands, roughness: 1, emissiveIntensity: 0.3, fog: false, transparent: true });
+  const giant = new THREE.Mesh(new THREE.SphereGeometry(55, 40, 24), AM.giant); giant.renderOrder = 1;   // drawn before its rings
   const ringTex = canvasTex(256, 256, (g) => {
     for (let r = 128; r > 84; r -= 3) { g.beginPath(); g.arc(128, 128, r, 0, TAU); g.fillStyle = `rgba(255,${205 + (r % 9) * 5},${170 + (r % 7) * 10},${0.4 + ((r * 7) % 5) / 10})`; g.fill(); }
     g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(128, 128, 85, 0, TAU); g.fill();
   });
   AM.rings = new THREE.Mesh(new THREE.RingGeometry(70, 105, 96), new THREE.MeshBasicMaterial({ map: ringTex, transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }));
-  AM.rings.rotation.set(-1.2, 0.35, 0);
+  AM.rings.rotation.set(-1.2, 0.35, 0); AM.rings.renderOrder = 2;
   const sat = new THREE.Group(); sat.add(giant, AM.rings); sat.position.set(72, 68, -360); sat.rotation.z = 0.35; alienSky.add(sat);
   AM.moons = [[-115, 62, -380, 14], [-55, 118, -390, 9]].map(([x, y, z, r]) => {
-    const m = new THREE.MeshStandardMaterial({ roughness: 1, emissiveIntensity: 0.35, fog: false }), moon = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), m);
+    const m = new THREE.MeshStandardMaterial({ roughness: 1, emissiveIntensity: 0.35, fog: false, transparent: true }), moon = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), m);
     moon.position.set(x, y, z); alienSky.add(moon); return m;
+  });
+  const glowTex = canvasTex(128, 128, (g) => {
+    const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.28, '#ffffff'); gr.addColorStop(0.5, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  });
+  AM.suns = [[-190, 120, -330], [-150, 175, -340]].map(([x, y, z]) => {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, fog: false, depthWrite: false, transparent: true })); s.position.set(x, y, z); alienSky.add(s); return s;
+  });
+}
+
+function drawGround(p) {                                       // a seamless tile for the ground, in the planet's colours
+  const c = AM.groundTex.image.getContext('2d'), W = 256;
+  c.globalCompositeOperation = 'source-over'; c.fillStyle = p.ground; c.fillRect(0, 0, W, W);
+  const wrap = (f) => { for (const dx of [-W, 0, W]) for (const dy of [-W, 0, W]) { c.save(); c.translate(dx, dy); f(); c.restore(); } };   // draw across the edges so it tiles
+  if (p.pattern === 'spots' || p.pattern === 'speckle') {
+    const n = p.pattern === 'spots' ? 26 : 500;
+    for (let i = 0; i < n; i++) {
+      const x = Math.random() * W, y = Math.random() * W, r = p.pattern === 'spots' ? rand(8, 26) : rand(0.8, 2.6);
+      c.fillStyle = Math.random() < 0.7 ? p.ground2 : 'rgba(255,255,255,.18)'; wrap(() => { c.beginPath(); c.ellipse(x, y, r, r * rand(0.6, 1), rand(0, TAU), 0, TAU); c.fill(); });
+    }
+  } else if (p.pattern === 'dunes') {
+    c.strokeStyle = p.ground2; c.lineWidth = 6;
+    for (let y = 0; y < W; y += 22) { c.beginPath(); for (let x = 0; x <= W; x += 8) c.lineTo(x, y + Math.sin(x / W * TAU * 2 + y) * 6); c.stroke(); }
+    for (let i = 0; i < 160; i++) { c.fillStyle = 'rgba(60,20,10,.25)'; c.fillRect(Math.random() * W, Math.random() * W, 2, 2); }
+  } else if (p.pattern === 'cracks') {
+    c.strokeStyle = p.ground2; c.lineCap = 'round';
+    for (let i = 0; i < 14; i++) {
+      let x = Math.random() * W, y = Math.random() * W, a = rand(0, TAU); const pts = [[x, y]];
+      for (let s = 0; s < 7; s++) { a += rand(-0.9, 0.9); x += Math.cos(a) * 14; y += Math.sin(a) * 14; pts.push([x, y]); }
+      for (const [lw, al] of [[7, 0.25], [3, 1]]) { c.globalAlpha = al; c.lineWidth = lw; wrap(() => { c.beginPath(); pts.forEach(([px, py]) => c.lineTo(px, py)); c.stroke(); }); }
+    }
+    c.globalAlpha = 1;
+  }
+  AM.groundTex.needsUpdate = true;
+}
+
+/* ---------- the locals: six kinds of alien, built in code; each planet has its own mix ---------- */
+const ALIEN_COLS = ['#8cff6b', '#ffb13d', '#ff7ad9', '#6bd8ff', '#c08bff', '#ffe14d', '#ff6b6b'];
+const eyeball = (g, x, y, z, r) => {
+  const e = mesh(new THREE.SphereGeometry(r, 14, 10), std('#ffffff', { roughness: 0.3 })); e.position.set(x, y, z); g.add(e);
+  const p = mesh(new THREE.SphereGeometry(r * 0.5, 10, 8), std('#1b1b2a')); p.position.set(x, y + r * 0.1, z + r * 0.75); g.add(p); return e;
+};
+const glowBall = (col, r) => new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), std(col, { emissive: col, emissiveIntensity: 1.2 }));
+const ALIEN_KINDS = {
+  blob(col) {                                                  // one big eye, two antennae; hops for joy
+    const g = new THREE.Group(), body = mesh(new THREE.SphereGeometry(0.42, 20, 14), std(col, { roughness: 0.5 }));
+    body.scale.set(1, 0.85, 1); body.position.y = 0.36; g.add(body); eyeball(g, 0, 0.5, 0.3, 0.2);
+    for (const s of [-1, 1]) {
+      const st = mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.35, 6), std(col)); st.position.set(s * 0.18, 0.82, 0); st.rotation.z = -s * 0.35; g.add(st);
+      const tip = glowBall('#ffe14d', 0.07); tip.position.set(s * 0.24, 0.98, 0); g.add(tip);
+    }
+    return { g, update(t, cheer) {
+      const hop = cheer ? Math.abs(Math.sin(t * 7)) : 0; g.position.y = this.y + hop * 0.5;
+      const k = 1.3 * this.s; g.scale.set(k * (1 + 0.05 * Math.sin(t * 3) - hop * 0.06), k * (1 - 0.05 * Math.sin(t * 3) + hop * 0.1), k); g.rotation.z = cheer ? Math.sin(t * 5) * 0.25 : 0;
+    } };
+  },
+  stalk(col) {                                                 // tall and thin with three eyes on stalks; waves both arms
+    const g = new THREE.Group(), m = std(col, { roughness: 0.5 });
+    const body = mesh(new THREE.CapsuleGeometry(0.22, 0.75, 4, 12), m); body.position.y = 0.62; g.add(body);
+    for (const s of [-1, 1]) { const leg = mesh(new THREE.CapsuleGeometry(0.07, 0.25, 4, 8), m); leg.position.set(s * 0.1, 0.15, 0); g.add(leg); }
+    [-1, 0, 1].forEach((k) => {
+      const st = mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.4, 6), m); st.position.set(k * 0.14, 1.28, 0); st.rotation.z = -k * 0.4; g.add(st);
+      eyeball(g, k * 0.22, 1.5 - Math.abs(k) * 0.05, 0, 0.1);
+    });
+    const arms = [-1, 1].map((s) => { const piv = new THREE.Group(), a = mesh(new THREE.CapsuleGeometry(0.05, 0.4, 4, 8), m); a.position.y = -0.25; piv.add(a); piv.position.set(s * 0.25, 0.95, 0); g.add(piv); return piv; });
+    return { g, update(t, cheer) {
+      g.rotation.z = Math.sin(t * 1.6) * 0.06; g.position.y = this.y + (cheer ? Math.abs(Math.sin(t * 6)) * 0.15 : 0);
+      arms.forEach((a, i) => { const s = i ? 1 : -1; a.rotation.z = s * (cheer ? 2.4 + Math.sin(t * 9 + i) * 0.4 : 0.25 + Math.sin(t * 2 + i) * 0.1); });
+    } };
+  },
+  octo(col) {                                                  // round head, two big eyes, six wiggly tentacles
+    const g = new THREE.Group(), m = std(col, { roughness: 0.5 });
+    const head = mesh(new THREE.SphereGeometry(0.45, 20, 14), m); head.scale.set(1, 0.9, 1); head.position.y = 0.78; g.add(head);
+    eyeball(g, -0.16, 0.85, 0.34, 0.12); eyeball(g, 0.16, 0.85, 0.34, 0.12);
+    const legs = [];
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * TAU + 0.5, piv = new THREE.Group(), t1 = mesh(new THREE.CapsuleGeometry(0.07, 0.4, 4, 8), m);
+      t1.position.y = -0.25; piv.add(t1); piv.position.set(Math.cos(a) * 0.28, 0.5, Math.sin(a) * 0.28); piv.rotation.y = -a; g.add(piv); legs.push({ piv, a });
+    }
+    return { g, update(t, cheer) {
+      g.position.y = this.y + (cheer ? Math.abs(Math.sin(t * 5)) * 0.45 : Math.sin(t * 2) * 0.03);
+      legs.forEach(({ piv }, i) => { piv.rotation.z = (cheer ? 0.9 : 0.45) + Math.sin(t * (cheer ? 9 : 3) + i) * 0.25; });
+    } };
+  },
+  bug(col) {                                                   // round beetle with flapping wings and springy antennae
+    const g = new THREE.Group(), m = std(col, { roughness: 0.4 }), dark = std('#2a2a3a');
+    const body = mesh(new THREE.SphereGeometry(0.34, 18, 12), m); body.scale.set(1.15, 0.8, 1); body.position.y = 0.42; g.add(body);
+    const head = mesh(new THREE.SphereGeometry(0.2, 14, 10), m); head.position.set(0, 0.55, 0.32); g.add(head);
+    eyeball(g, -0.09, 0.62, 0.46, 0.07); eyeball(g, 0.09, 0.62, 0.46, 0.07);
+    for (const s of [-1, 1]) {
+      const an = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 5), dark); an.position.set(s * 0.08, 0.82, 0.34); an.rotation.z = -s * 0.5; g.add(an);
+      const tip = glowBall('#ffffff', 0.05); tip.position.set(s * 0.16, 0.95, 0.34); g.add(tip);
+      for (let k = -1; k <= 1; k++) { const leg = mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.3, 5), dark); leg.position.set(s * 0.32, 0.16, k * 0.18); leg.rotation.z = s * 0.7; g.add(leg); }
+    }
+    const wingMat = new THREE.MeshStandardMaterial({ color: '#e8f8ff', transparent: true, opacity: 0.6, side: THREE.DoubleSide, roughness: 0.2 });
+    const wings = [-1, 1].map((s) => { const piv = new THREE.Group(), w = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), wingMat); w.scale.set(1, 0.04, 0.55); w.position.x = s * 0.3; piv.add(w); piv.position.set(0, 0.7, -0.05); g.add(piv); return piv; });
+    return { g, update(t, cheer) {
+      const f = cheer ? 0.45 + Math.abs(Math.sin(t * 30)) * 0.6 : 0.15 + Math.sin(t * 3) * 0.08;
+      wings[0].rotation.z = f; wings[1].rotation.z = -f; g.position.y = this.y + (cheer ? 0.25 + Math.sin(t * 4) * 0.2 : 0);
+    } };
+  },
+  jelly(col) {                                                 // a see-through floating jellyfish with dangling strands
+    const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.5, transparent: true, opacity: 0.75, roughness: 0.2 });
+    const bell = mesh(new THREE.SphereGeometry(0.5, 20, 12, 0, TAU, 0, Math.PI / 2), m); bell.scale.y = 0.8; g.add(bell);
+    const rim = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), m); rim.rotation.x = Math.PI / 2; g.add(rim);
+    eyeball(g, -0.14, 0.18, 0.36, 0.08); eyeball(g, 0.14, 0.18, 0.36, 0.08);
+    const strands = [];
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU, s = mesh(new THREE.CylinderGeometry(0.02, 0.01, 0.7, 5), m); s.position.set(Math.cos(a) * 0.3, -0.35, Math.sin(a) * 0.3); g.add(s); strands.push(s); }
+    return { g, update(t, cheer) {
+      g.position.y = this.y + 1.4 + Math.sin(t * 1.5) * 0.25 + (cheer ? 0.6 + Math.sin(t * 4) * 0.3 : 0);
+      const pulse = 1 + Math.sin(t * 3) * 0.08; bell.scale.set(pulse, 0.8 / pulse, pulse); g.rotation.y += cheer ? 0.08 : 0.01;
+      strands.forEach((s, i) => { s.rotation.x = Math.sin(t * 2 + i) * 0.25; });
+    } };
+  },
+  saucer(col) {                                                // a tiny flying saucer with a little alien under its glass dome
+    const g = new THREE.Group(), hull = mesh(new THREE.SphereGeometry(0.6, 24, 12), std('#c9d1e0', { metalness: 0.5, roughness: 0.3 }));
+    hull.scale.set(1, 0.25, 1); g.add(hull);
+    const pilot = mesh(new THREE.SphereGeometry(0.17, 14, 10), std(col)); pilot.position.y = 0.2; g.add(pilot); eyeball(g, 0, 0.24, 0.12, 0.07);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 10, 0, TAU, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#bfe8ff', transparent: true, opacity: 0.4, roughness: 0.1 }));
+    dome.position.y = 0.06; g.add(dome);
+    const lights = []; for (let i = 0; i < 6; i++) { const a = i / 6 * TAU, l = glowBall(i % 2 ? '#ffe14d' : col, 0.05); l.position.set(Math.cos(a) * 0.55, 0, Math.sin(a) * 0.55); g.add(l); lights.push(l); }
+    return { g, update(t, cheer) {
+      const r = cheer ? 1.2 : 0.2, w = cheer ? 2.2 : 0.6;
+      g.position.set(this.x + Math.cos(t * w) * r, this.y + 2.6 + Math.sin(t * 2) * 0.2, this.z + Math.sin(t * w) * r * 0.6);
+      g.rotation.y = t * 2; g.rotation.z = Math.sin(t * 1.3) * 0.12;
+      lights.forEach((l, i) => { l.visible = Math.sin(t * 8 + i * 1.5) > -0.3; });
+    } };
+  },
+};
+const CROWD_SPOTS = [[-3.1, 1.8], [3.3, 1.3], [-4.4, -1.4], [4.6, -1.8], [-2.3, 3.5], [2.5, 3.7]];
+function buildCrowd(p) {
+  for (const a of crowd) disposeTree(a.g);
+  crowd.length = 0;
+  CROWD_SPOTS.forEach(([x, z], i) => {
+    const kind = p.aliens[i % p.aliens.length], a = ALIEN_KINDS[kind](ALIEN_COLS[Math.floor(Math.random() * ALIEN_COLS.length)]);
+    a.x = x; a.y = -0.35; a.z = z; a.phase = i * 1.3 + rand(0, 1); a.s = z > 3 ? 0.8 : 1;   // the two nearest the camera a bit smaller
+    a.g.position.set(x, -0.35, z); a.g.rotation.y = -x * 0.12; if (kind !== 'blob') a.g.scale.setScalar(1.25 * a.s);
+    a.g.traverse((o) => { o.raycast = () => {}; }); alien.add(a.g); crowd.push(a);
   });
 }
 function showPlanet(p) {
-  planet = p;
-  AM.ground.color.set(p.ground); AM.rock.color.set(p.rock); AM.ring.color.set(p.ring); AM.crater.color.set(p.crater);
+  planet = p; drawGround(p);
+  AM.rock.color.set(p.rock); AM.ring.color.set(p.ring); AM.rim.color.set(p.rim); AM.spire.color.set(p.spire);
+  AM.crater.color.set(p.crater); AM.crater.emissive.set(p.glow ? p.crater : '#000000'); AM.crater.emissiveIntensity = p.glow ? 1 : 0;
   AM.caps.forEach((m, i) => { m.color.set(p.caps[i]); m.emissive.set(p.caps[i]); });
   AM.crystals.forEach((m, i) => { m.color.set(p.crystals[i]); m.emissive.set(p.crystals[i]); });
+  AM.bulbs.forEach((m, i) => { m.color.set(p.bulbs[i]); m.emissive.set(p.bulbs[i]); });
   AM.hills.forEach((m, i) => m.color.set(p.hills[i]));
   AM.moons.forEach((m, i) => { m.color.set(p.moons[i]); m.emissive.set(p.moons[i]); });
   const c = AM.bands.image.getContext('2d'); for (let y = 0; y < 256; y += 16) { c.fillStyle = p.bands[(y / 16) % p.bands.length]; c.fillRect(0, y, 64, 16); }
   AM.bands.needsUpdate = true; AM.giant.emissive.set(p.bands[1]); AM.rings.visible = p.rings;
-  shrooms.visible = p.shrooms; gems.visible = p.gems;
+  AM.suns.forEach((s, i) => { const d = p.suns[i]; s.visible = !!d; if (d) { s.material.color.set(d[0]); s.scale.setScalar(d[1]); } });
+  for (const [k, g] of Object.entries(FEAT)) g.visible = p.F.includes(k);
+  buildCrowd(p);
 }
-function setWorld(w) {
+let lightFade = null, alienFade = 1;
+function setWorld(w, fade = 0) {                              // fade > 0: lights and the alien sky blend in over that many seconds
   const a = w === 'alien', P = a ? planet : site;
   earth.visible = earthPad.visible = !a; alien.visible = alienSky.visible = a;
   skyU.top.value.set(P.sky[0]); skyU.bottom.value.set(P.sky[1]);
-  hemi.color.set(P.hemi[0]); hemi.groundColor.set(P.hemi[1]); sunLight.color.set(P.sun || 0xfff2da);
+  const to = [new THREE.Color(P.hemi[0]), new THREE.Color(P.hemi[1]), new THREE.Color(P.sun || 0xfff2da)], L = [hemi.color, hemi.groundColor, sunLight.color];
+  if (fade > 0) lightFade = { from: L.map((c) => c.clone()), to, t: 0, dur: fade };
+  else { lightFade = null; L.forEach((c, i) => c.copy(to[i])); }
+  alienFade = a && fade > 0 ? 0 : 1; applyAlienFade();
+}
+const smooth01 = (u) => u * u * (3 - 2 * u);
+function applyAlienFade() {
+  const o = smooth01(alienFade); AM.giant.opacity = AM.rings.material.opacity = o; AM.moons.forEach((m) => { m.opacity = o; }); AM.suns.forEach((s) => { s.material.opacity = o; });
+}
+function updateWorldFade(dt) {
+  if (lightFade) {
+    const f = lightFade; f.t += dt; const u = smooth01(Math.min(1, f.t / f.dur));
+    [hemi.color, hemi.groundColor, sunLight.color].forEach((c, i) => c.copy(f.from[i]).lerp(f.to[i], u));
+    if (f.t >= f.dur) lightFade = null;
+  }
+  if (alienFade < 1) { alienFade = Math.min(1, alienFade + dt / 2.5); applyAlienFade(); }
 }
 showSite(SITES[Math.floor(Math.random() * SITES.length)]); showPlanet(PLANETS[Math.floor(Math.random() * PLANETS.length)]); setWorld('earth');
 function updateBlobs(dt, time) {
-  for (const b of blobs) {
-    const t = time + b.phase, hop = celebrating ? Math.abs(Math.sin(t * 7)) : 0;
-    b.g.position.y = -0.35 + hop * 0.5;
-    b.g.scale.set(1.3 * (1 + 0.05 * Math.sin(t * 3) - hop * 0.06), 1.3 * (1 - 0.05 * Math.sin(t * 3) + hop * 0.1), 1.3);
-    b.g.rotation.z = celebrating ? Math.sin(t * 5) * 0.25 : 0;
-  }
+  for (const a of crowd) a.update(time + a.phase, celebrating, dt);
+  for (const f of floaters) { f.b.position.y = f.y + Math.sin(time * 0.6 + f.ph) * 0.6; f.b.rotation.y += dt * 0.1; }
 }
 
 /* ---------- hyperspeed: star streaks rushing past the rocket ---------- */
@@ -754,6 +980,7 @@ class Particles {
     this.c0[j] = c0.r; this.c0[j + 1] = c0.g; this.c0[j + 2] = c0.b; this.c1[j] = c1.r; this.c1[j + 1] = c1.g; this.c1[j + 2] = c1.b;
     this.age[i] = 0; this.life[i] = life; this.s0[i] = s0; this.s1[i] = s1; this.a0[i] = a0; this.grav[i] = grav; this.drag[i] = drag;
   }
+  shift(dy) { for (let j = 1; j < this.pos.length; j += 3) this.pos[j] += dy; }
   update(dt) {
     const { n, pos, vel, col, size, alpha, c0, c1, age, life } = this;
     for (let i = 0; i < n; i++) {
@@ -1655,7 +1882,7 @@ function drop() {
     layoutAll(); ensureSide();
   } else if (d.pilot) {
     showSeatRing(null); const w = d.obj.getWorldPosition(V()), seen = d.obj.visible; disposeTree(d.obj);
-    if (d.target) { seatPilot(d.target, d.pilot); sfx.pop(); sparkle(seatWorld(d.target)); sfx.say(LABELS[d.pilot] + '!'); }
+    if (d.target) { seatPilot(d.target, d.pilot); sfx.pop(); sparkle(seatWorld(d.target)); sfx.say(LABELS[d.pilot] + '!', 'say-' + d.pilot); }
     else { if (seen) puff(w); sfx.poof(); }
   } else {
     const s = d.sticker;
@@ -1723,7 +1950,7 @@ function tapAdd(tile) {
     const type = tile.dataset.pilot, crew = stackParts().filter(isCrew);
     if (!crew.length) { restartAnim(tile, 'wiggle'); sfx.nope(); restartAnim(tabEls.noses, 'nudge'); return; }
     const p = crew.find((c) => !c.pilot) || crew[crew.length - 1];
-    seatPilot(p, type); sfx.pop(); sparkle(seatWorld(p)); sfx.say(LABELS[type] + '!');
+    seatPilot(p, type); sfx.pop(); sparkle(seatWorld(p)); sfx.say(LABELS[type] + '!', 'say-' + type);
     return;
   }
   if (tile.dataset.type) {
@@ -1876,8 +2103,102 @@ launchBtn.addEventListener('click', () => {
   if (state !== 'build' || drag || activePointer !== null) return;
   if (!stack.length) { restartAnim(launchBtn, 'wiggle'); sfx.nope(); showDragHint(); return; }
   outcome = evaluate(); turnVel = 0; hideHand(); clearHints(); launchBtn.classList.remove('ready');
-  setState('countdown'); showCount('3'); sfx.beep(); sfx.say('Three');   // first utterance inside the tap unlocks speech on iOS
+  const crew = parts.filter((p) => isPlaced(p) && p.pilot);
+  if (crew.length) { startBoarding(crew); sfx.say('All aboard!', 'say-all-aboard'); } else { startCountdown(); sfx.say('Three', 'say-3'); }   // first utterance inside the tap unlocks speech on iOS
 });
+function startCountdown() { setState('countdown'); showCount('3'); sfx.beep(); }
+
+/* ---------- boarding: before the countdown each pilot walks over, rides the lift up, waves and hops into their seat ---------- */
+const SUIT = { astronaut: '#f4f6fb', cat: '#ffa94d', dog: '#b07a4a', robot: '#9aa6bd', alien: '#7ee06a', bunny: '#f3e9f2' };
+const HEAD_Y = 1.05, WALKER_S = 0.85, DECK_TOP = 0.08;
+const ease = (u) => u * u * (3 - 2 * u);
+function makeWalker(type) {
+  const g = new THREE.Group(), m = std(SUIT[type] || SUIT.astronaut, { roughness: 0.6 }), boots = std('#3a3f5c');
+  const body = mesh(new THREE.CapsuleGeometry(0.2, 0.25, 4, 12), m); body.position.y = 0.62; g.add(body);
+  const pack = mesh(new THREE.BoxGeometry(0.26, 0.3, 0.12), std('#c9d1e0')); pack.position.set(0, 0.66, -0.2); g.add(pack);
+  const limb = (x, y, r, len, foot) => {
+    const piv = new THREE.Group(); piv.position.set(x, y, 0);
+    const l = mesh(new THREE.CapsuleGeometry(r, len, 4, 8), m); l.position.y = -(len / 2 + r) + 0.02; piv.add(l);
+    if (foot) { const b = mesh(new THREE.BoxGeometry(0.14, 0.08, 0.2), boots); b.position.set(0, -0.36, 0.03); piv.add(b); }
+    g.add(piv); return piv;
+  };
+  const legs = [limb(-0.1, 0.4, 0.075, 0.22, true), limb(0.1, 0.4, 0.075, 0.22, true)];
+  const arms = [limb(-0.25, 0.8, 0.06, 0.2, false), limb(0.25, 0.8, 0.06, 0.2, false)];
+  const head = BUILD[type](); head.position.y = HEAD_Y; g.add(head);
+  g.traverse((o) => { o.raycast = () => {}; });
+  g.scale.setScalar(WALKER_S); scene.add(g);
+  return { g, legs, arms };
+}
+const lift = new THREE.Group(); lift.visible = false; scene.add(lift);   // a red tower with a yellow deck that rides up beside the rocket
+const liftMat = std('#ff4b3e', { roughness: 0.5 });
+const liftRails = [-1, 1].map((s) => { const r = mesh(PG.box, liftMat); r.scale.set(0.09, 1, 0.09); r.position.z = s * 0.48; lift.add(r); return r; });
+const liftTop = mesh(PG.box, liftMat); liftTop.scale.set(0.12, 0.1, 1.05); lift.add(liftTop);
+const liftDeck = mesh(PG.box, std('#ffd23f', { roughness: 0.6 })); liftDeck.scale.set(0.9, DECK_TOP, 0.9); lift.add(liftDeck);
+function setLift(h, deck) {                                   // h: tower height, deck: height of the deck's underside (both above the ground)
+  for (const r of liftRails) { r.scale.y = Math.max(0.01, h); r.position.y = h / 2; }
+  liftTop.position.y = h; liftTop.visible = h > 0.05; liftDeck.position.y = deck + DECK_TOP / 2;
+}
+let board = null;
+function startBoarding(crew) {
+  setState('board');
+  const lx = Math.max(2.4, layoutR + 0.5), lz = 0.35, seats = crew.map((p) => seatWorld(p));
+  board = { crew: crew.map((p, i) => ({ p, seat: seats[i] })), k: -1, lx, lz, H: Math.max(...seats.map((v) => v.y)) + 1.35, phase: 'raise', t: 0, step: 0 };
+  board.speed = crew.length > 1 ? 1.5 : 1;                // several pilots: everyone hurries a little
+  for (const p of crew) p.pilot.obj.visible = false;
+  lift.position.set(lx, -0.35, lz); lift.visible = true; setLift(0, 0); sfx.rewind();
+  fitWTarget = Math.max(fitWTarget, 2 * (lx + 1.2)); fitTarget = Math.max(fitTarget, board.H + 1.5);   // zoom out so the lift fits on screen
+}
+function walkPose(w, t, amt) {
+  const a = Math.sin(t * 13) * 0.65 * amt;
+  w.legs[0].rotation.x = a; w.legs[1].rotation.x = -a; w.arms[0].rotation.x = -a * 0.8; w.arms[1].rotation.x = a * 0.8;
+}
+function updateBoard(dt) {
+  const b = board; b.t += dt * b.speed;
+  if (b.phase === 'raise') {                                // the tower grows out of the ground
+    const u = Math.min(1, b.t / 0.5); setLift(b.H * ease(u), 0);
+    if (u >= 1) b.phase = 'next';
+    return;
+  }
+  if (b.phase === 'next') {                                 // next pilot walks in from the side
+    b.k++; const c = b.crew[b.k];
+    if (!c) { b.phase = 'fold'; b.t = 0; sfx.rewind(); return; }
+    c.w = makeWalker(c.p.pilot.type); c.from = V(b.lx + 3.4, -0.35, b.lz + 1.1); c.to = V(b.lx, -0.35 + DECK_TOP, b.lz);
+    c.w.g.position.copy(c.from); b.phase = 'walk'; b.t = 0; b.step = 0; setLift(b.H, 0);
+    return;
+  }
+  if (b.phase === 'fold') {                                 // everyone is in: the tower sinks away and the countdown starts
+    const u = Math.min(1, b.t / 0.5); setLift(b.H * (1 - ease(u)), 0);
+    if (u >= 1) { lift.visible = false; board = null; startCountdown(); sfx.say('Three', 'say-3'); }
+    return;
+  }
+  const c = b.crew[b.k], w = c.w;
+  if (b.phase === 'walk') {
+    const u = Math.min(1, b.t / 1.3);
+    w.g.position.lerpVectors(c.from, c.to, ease(u)); w.g.position.y += Math.abs(Math.sin(b.t * 13)) * 0.04 * (1 - u);
+    w.g.rotation.y = Math.atan2(c.to.x - c.from.x, c.to.z - c.from.z); walkPose(w, b.t, 1 - Math.max(0, u - 0.85) / 0.15);
+    if (b.t > b.step) { b.step += 0.24; sfx.pick(); }
+    if (u >= 1) { b.phase = 'ride'; b.t = 0; c.y0 = c.to.y; c.y1 = Math.max(c.y0, c.seat.y + 0.3 - HEAD_Y * WALKER_S); c.dur = clamp((c.y1 - c.y0) / 3, 0.5, 1.6); sfx.rewind(); }
+  } else if (b.phase === 'ride') {                          // up the lift, turning to wave at the camera
+    const u = Math.min(1, b.t / c.dur), y = c.y0 + (c.y1 - c.y0) * ease(u);
+    w.g.position.y = y; setLift(b.H, y + 0.35 - DECK_TOP);
+    w.g.rotation.y = c.rot0 = (-Math.PI / 2) + (Math.PI / 2 + 0.25) * ease(Math.min(1, u * 2));   // from facing the rocket to facing the camera
+    walkPose(w, 0, 0); w.arms[1].rotation.z = (2.6 + Math.sin(b.t * 14) * 0.35) * ease(Math.min(1, u * 3));
+    if (u >= 1) { b.phase = 'hop'; b.t = 0; c.hop0 = w.g.position.clone(); sfx.boop(); }
+  } else if (b.phase === 'hop') {                           // jump across and pop into the seat
+    const u = Math.min(1, b.t / 0.55), e = ease(u), sc = WALKER_S * (1 - 0.75 * e);
+    const target = c.seat.clone().addScaledVector(Y, -HEAD_Y * sc);
+    w.g.position.lerpVectors(c.hop0, target, e); w.g.position.y += Math.sin(u * Math.PI) * 0.7; w.g.scale.setScalar(sc);
+    const face = Math.atan2(c.seat.x - c.hop0.x, c.seat.z - c.hop0.z); w.g.rotation.y = c.rot0 + (face - c.rot0) * Math.min(1, e * 2);
+    w.arms[1].rotation.z = 2.6 * (1 - e); w.arms[0].rotation.z = -2.6 * e;
+    if (u >= 1) {
+      disposeTree(w.g); c.w = null; c.p.pilot.obj.visible = true; c.p.pilot.bounce = 1; sparkle(c.seat); sfx.pop(); sfx.giggle();
+      b.phase = 'down'; b.t = 0; c.deck0 = liftDeck.position.y - DECK_TOP / 2;
+    }
+  } else if (b.phase === 'down') {                          // the empty deck goes back down
+    const u = Math.min(1, b.t / 0.5); setLift(b.H, c.deck0 * (1 - ease(u)));
+    if (u >= 1) b.phase = 'next';
+  }
+}
 
 function startFly() {
   setState('fly'); flyH = stackHeight(); flyVel = 0; lifted = false; celebrating = false; flyPhase = 'up'; warpT = 0; jumped = false;
@@ -1895,9 +2216,9 @@ function startFail() {
 }
 
 function updateCountdown() {
-  if (at(1)) { showCount('2'); sfx.beep(); sfx.say('Two'); }
-  if (at(2)) { showCount('1'); sfx.beep(); sfx.say('One'); }
-  if (at(3)) { showCount('GO!'); sfx.go(); sfx.say('Blast off!'); outcome.ok ? startFly() : startFail(); }
+  if (at(1)) { showCount('2'); sfx.beep(); sfx.say('Two', 'say-2'); }
+  if (at(2)) { showCount('1'); sfx.beep(); sfx.say('One', 'say-1'); }
+  if (at(3)) { showCount('GO!'); sfx.go(); sfx.say('Blast off!', 'say-blast-off'); outcome.ok ? startFly() : startFail(); }
 }
 /* ---------- little parachutes for pilots ejecting from a rocket that is about to crash ---------- */
 function makeChute(R, lineLen, cols) {
@@ -1916,20 +2237,21 @@ function makeChute(R, lineLen, cols) {
   return { g, canopy, t: 0 };
 }
 /* A good flight: lift off, climb into space, jump to hyperspeed, drop out above an alien planet and land there on the engines. */
-const WARP_CHARGE = 1.5, WARP_CRUISE = 3.2, WARP_EXIT = 0.6, ARRIVE_H = 90;
-let flyPhase = 'up', landT = 0, warpT = 0, jumped = false, warpCam = 0, warpCamTarget = 0, warpFov = 0, warpFovTarget = 0;
+const WARP_CHARGE = 1.5, WARP_CRUISE = 3.2, ARRIVE_MIN = 420, LAND_TIME = 6.5;
+let flyPhase = 'up', landT = 0, warpT = 0, jumped = false, warpCam = 0, warpCamTarget = 0, warpFov = 0, warpFovTarget = 0, landFrom = 0, landClock = 0;
 function flash(col, ms) { flashEl.style.background = col; flashEl.animate([{ opacity: 0.95 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' }); }
-function arrive() {                                    // hidden by a white flash: swap worlds and put the rocket high above the alien planet
-  flash('#ffffff', 1100); sfx.warpOut(); showPlanet(pickOther(PLANETS, planet)); setWorld('alien');
-  warp.visible = false; warpSpeed = 0; warpCam = warpCamTarget = 0; warpFov = warpFovTarget = 0;
-  fire.clear(); smoke.clear();
-  rocketRoot.position.y = ARRIVE_H; flyVel = 0; flyPhase = 'land';
-  camLookY = camLookTarget = ARRIVE_H + flyH * 0.55;
-  setTimeout(() => { if (state === 'fly') sfx.say('A new planet!'); }, 900);
+function beginArrival() {
+  // Leaving hyperspeed far above the new planet: up here everything is fogged into the black of space, so the worlds can
+  // swap unseen. The rocket, camera and particles are lifted together if needed, which looks like nothing happened.
+  const up = Math.max(0, ARRIVE_MIN - rocketRoot.position.y);
+  if (up) { rocketRoot.position.y += up; camLookY += up; camLookTarget += up; fire.shift(up); smoke.shift(up); }
+  showPlanet(pickOther(PLANETS, planet)); setWorld('alien', 2.5); sfx.warpOut();
+  warpCamTarget = 0; warpFovTarget = 0; rocketRoot.position.x = 0; landFrom = rocketRoot.position.y; landClock = 0; flyPhase = 'land';
+  setTimeout(() => { if (state === 'fly') sfx.say('A new planet!', 'say-new-planet'); }, 1600);
 }
 
 function updateFly(dt) {
-  const y = rocketRoot.position.y;
+  const y = rocketRoot.position.y; let camFollows = false;
   if (flyPhase === 'up') {
     if (st < 1.1) {                                    // ignition, held down on the pad
       flameLevel = Math.min(1, st / 0.6); rocketRoot.position.x = rand(-0.02, 0.02);
@@ -1950,22 +2272,27 @@ function updateFly(dt) {
       const u = warpT / WARP_CHARGE; warpSpeed = 4 + u * u * 70; warpMat.color.setScalar(Math.min(1, u * 2.5));
       shake = Math.max(shake, 0.02 + u * 0.06); rocketRoot.position.x = rand(-0.03, 0.03) * u;
     } else if (warpT < WARP_CHARGE + WARP_CRUISE) {    // JUMP: the lines stretch all the way, the view widens
-      if (!jumped) { jumped = true; sfx.warpJump(); sfx.say('Hyperspeed!'); flash('#dff0ff', 700); shake = 0.6; warpFovTarget = 1; }
+      if (!jumped) { jumped = true; sfx.warpJump(); sfx.say('Hyperspeed!', 'say-hyperspeed'); flash('#dff0ff', 700); shake = 0.6; warpFovTarget = 1; }
       warpSpeed += (900 - warpSpeed) * (1 - Math.exp(-dt * 4)); rocketRoot.position.x = rand(-0.02, 0.02);
       if (warpT > WARP_CHARGE + 0.5) warpFovTarget = 0.6;
-    } else if (warpT < WARP_CHARGE + WARP_CRUISE + WARP_EXIT) {   // slowing down: lines shrink back into stars
-      warpSpeed *= Math.exp(-dt * 7); warpFovTarget = 0; rocketRoot.position.x = 0;
-    } else arrive();
+    } else beginArrival();
     if (flyPhase === 'warp') { updateWarp(dt); flameLevel = 1.3; flickerFlames(flameLevel); emitExhaust(dt, 1); sfx.rumbleSet(0.35); }
   } else if (flyPhase === 'land') {                    // tail first on the engines: fast at first, then gently down onto the rock
-    const v = clamp(y * 1.3, 1.1, 45); rocketRoot.position.y = Math.max(0, y - v * dt);
+    if (warp.visible) {                                // the streaks shrink back into stars and fade away
+      warpSpeed *= Math.exp(-dt * 4); const f = Math.max(0, warpMat.color.r - dt * 0.8); warpMat.color.setScalar(f); updateWarp(dt);
+      if (f <= 0) warp.visible = false;
+    }
+    // height follows (1 - u)^3: quick while high up in empty space, slow over the last few metres, and zero speed at touchdown
+    landClock += dt; const u = Math.min(1, landClock / LAND_TIME), ny = landFrom * Math.pow(1 - u, 3), dy = ny - y;
+    rocketRoot.position.y = ny; const v = Math.abs(dy) / dt;
     flameLevel = clamp(1.25 - y / 80, 0.45, 1.1); flickerFlames(flameLevel);
     if (v < 10) emitExhaust(dt, Math.min(1, flameLevel));   // falling faster than the exhaust would leave it hanging above the rocket
     if (y < 6) emitGroundSmoke(dt, 10 + 60 * (1 - y / 6));
     sfx.rumbleSet(0.2 + 0.3 * flameLevel);
     rocketRoot.rotation.z = Math.sin(st * 1.7) * 0.03 * clamp(y / 3, 0, 1);
-    camLookY = Math.max(BUILD_LOOK, rocketRoot.position.y + flyH * 0.45);   // follow closely; the usual easing would let a fast fall leave the screen
-    if (rocketRoot.position.y <= 0) {
+    // follow with the rocket's own speed plus a gentle catch-up, so a fast fall never leaves the screen and nothing jumps
+    camLookY += dy; camLookY += (Math.max(BUILD_LOOK, ny + flyH * 0.45) - camLookY) * (1 - Math.exp(-dt * 3)); camFollows = true;
+    if (u >= 1) {
       flyPhase = 'landed'; landT = 0; rocketRoot.rotation.z = 0; flamesOff(); sfx.rumbleStop(); sfx.thump(); shake = Math.max(shake, 0.25);
       for (let i = 0; i < 28; i++) { const a = i / 28 * TAU; smoke.emit(Math.cos(a), 0.15, Math.sin(a), Math.cos(a) * 3, 0.3, Math.sin(a) * 3, rand(1, 1.6), 0.8, 2.2, C.smokeW0, C.smokeW1, 0.55, 0.2, 1.5); }
     }
@@ -1973,7 +2300,7 @@ function updateFly(dt) {
     landT += dt;
     if (!celebrating && landT > 0.5) { celebrating = true; sfx.fanfare(); confetti(); showResult(true); addStar(); }
   }
-  camLookTarget = Math.max(BUILD_LOOK, rocketRoot.position.y + flyH * 0.55);   // follow it up and back down
+  camLookTarget = camFollows ? camLookY : Math.max(BUILD_LOOK, rocketRoot.position.y + flyH * 0.55);   // follow it up and back down
 }
 
 /* ---------- pilots eject with little parachutes when a rocket is about to crash ---------- */
@@ -1988,7 +2315,7 @@ function ejectPilots() {
     ejectees.push({ g, c, head, v: V(-failDir.x * rand(1.5, 2.5) + rand(-1, 1), rand(8, 10), -failDir.z * rand(1, 2)), open: false, t: 0, landed: 0 });
     sfx.boop();
   }
-  if (ejectees.length) sfx.say('Wheee!');
+  if (ejectees.length) sfx.say('Wheee!', 'say-wheee');
 }
 function updateEjectees(dt) {
   for (const e of ejectees) {
@@ -2225,7 +2552,7 @@ function showResult(win) {
   resultEl.className = win ? 'win' : 'lose'; resultEl.hidden = false;
   $('#resTitle').textContent = win ? 'HOORAY!' : 'OOPS!';
   $('#btnAgain').hidden = !win; $('#btnNew2').hidden = !win; $('#btnFix').hidden = win;
-  if (!win) { fillProblemStrip(outcome.problems.slice(0, 1)); const first = outcome.problems[0]; if (first) setTimeout(() => sfx.say(HINT_SAY[first.what || first.kind]), 500); }
+  if (!win) { fillProblemStrip(outcome.problems.slice(0, 1)); const first = outcome.problems[0]; if (first) setTimeout(() => sfx.say(HINT_SAY[first.what || first.kind], 'hint-' + (first.what || first.kind)), 500); }
 }
 function addStar() { stars++; store.set('stars', stars); $('#starsN').textContent = stars; restartAnim($('#stars'), 'pop'); }
 function confetti() {
@@ -2327,7 +2654,7 @@ function updateCamera(dt) {
   shake *= Math.exp(-dt * 4);
   sky.position.copy(camera.position);
   const s = clamp((camLookY - 10 - fitH * 0.4) / 55, 0, 1);
-  skyU.space.value = s; starMat.opacity = s; scene.fog.color.copy(skyU.bottom.value).lerp(NIGHT_BOTTOM, s); hemi.intensity = 1.5 - 0.6 * s;
+  skyU.space.value = s; starMat.opacity = alien.visible ? Math.max(s, planet.stars * smooth01(alienFade)) : s;   // some planets show stars by day scene.fog.color.copy(skyU.bottom.value).lerp(NIGHT_BOTTOM, s); hemi.intensity = 1.5 - 0.6 * s;
 }
 
 function resize() {
@@ -2346,12 +2673,13 @@ const clock = new THREE.Clock(); let time = 0;
 function frame(dt) {
   time += dt; prevSt = st; st += dt;
   if (state === 'build') updateBuild(dt);
+  else if (state === 'board') updateBoard(dt);
   else if (state === 'countdown') updateCountdown();
   else if (state === 'fly') updateFly(dt);
   else if (state === 'fail') updateFail(dt);
   else if (state === 'crashed') updateCrashed(dt);
   if (!orbit) { turntable.rotation.y += turnVel * dt; turnVel *= Math.exp(-dt * 2.5); }
-  updateParts(dt, time); updateEjectees(dt); if (alien.visible) updateBlobs(dt, time);
+  updateParts(dt, time); updateEjectees(dt); updateWorldFade(dt); if (alien.visible) updateBlobs(dt, time);
   flowTex.offset.y -= dt * 1.2; if (seaTex) seaTex.offset.x += dt * 0.012;
   for (const p of parts) if (p.docks) for (const d of p.docks) if (d.empty) { const w = Math.sin(time * 5 + p.id); d.orb.material.emissiveIntensity = 0.8 + 0.6 * w; d.orb.scale.setScalar(1 + 0.12 * w); }
   seatRing.scale.setScalar(1 + 0.08 * Math.sin(time * 8)); hintMat.opacity = 0.3 + 0.2 * Math.sin(time * 6);
@@ -2366,7 +2694,8 @@ function frame(dt) {
 renderer.setAnimationLoop(() => frame(Math.min(clock.getDelta(), 0.05)));
 window.__blastoff = { parts, stack, sideSlots, mainChain, allChains, evaluate, screenOf: (p) => toScreen(p.group.getWorldPosition(V())), socketOf: (hub, k) => toScreen(rocketRoot.localToWorld(hub.arms[k].base.clone())),
   tick: (seconds) => { for (let i = 0; i < seconds * 30; i++) frame(1 / 30); },   // step the game clock (e.g. when the tab is hidden)
-  get state() { return state; }, get site() { return site.id; }, get planet() { return planet.id; } };   // handy for debugging in the console
+  get state() { return state; }, get site() { return site.id; }, get planet() { return planet.id; },
+  get cam() { return { look: camLookY, target: camLookTarget, y: camera.position.y, warpCam, fov: camera.fov, rocketY: rocketRoot.position.y, phase: flyPhase }; } };   // handy for debugging in the console
 
 </script>
 </body>
