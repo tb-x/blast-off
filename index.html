@@ -79,7 +79,7 @@
 
   /* ---------- HUD ---------- */
   .hud{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));display:flex;gap:10px;z-index:5}
-  .hud.left{left:calc(12px + env(safe-area-inset-left,0px))}
+  .hud.left{left:calc(66px + env(safe-area-inset-left,0px))}   /* leaves room for the home button */
   .hud.right{right:12px}
   .rbtn{width:54px;height:54px;border-radius:50%;border:none;background:#fff;color:var(--blue);display:grid;place-items:center;
     box-shadow:0 4px 0 rgba(20,26,61,.28);padding:0;cursor:pointer}
@@ -92,6 +92,13 @@
   .stars .n{padding-top:5px}
   @keyframes starpop{0%{transform:scale(1)}40%{transform:scale(1.5) rotate(-10deg)}100%{transform:scale(1)}}
   .stars.pop svg{animation:starpop .6s ease 2}
+
+  /* ---------- home button (back to all games) ---------- */
+  #home{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:calc(10px + env(safe-area-inset-left,0px));z-index:50;
+    width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#2a2140;background:rgba(255,255,255,.82);
+    box-shadow:0 3px 0 rgba(0,0,0,.18);touch-action:manipulation;-webkit-tap-highlight-color:transparent;text-decoration:none}
+  #home svg{width:24px;height:24px}
+  #home:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(0,0,0,.18)}
 
   /* ---------- launch button ---------- */
   #launch{position:absolute;right:14px;bottom:14px;width:100px;height:100px;border-radius:50%;border:none;padding:8px;cursor:pointer;z-index:5;
@@ -171,6 +178,7 @@
 </style>
 </head>
 <body data-state="build">
+<a id="home" href="../index.html" aria-label="All games" title="All games"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 11 12 4l8.5 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 9.8V20h12V9.8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M10 20v-5.5h4V20" fill="currentColor"/></svg></a>
 <div id="app">
   <div id="stage">
     <canvas id="c" aria-label="Rocket building area"></canvas>
